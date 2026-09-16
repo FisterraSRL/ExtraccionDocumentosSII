@@ -421,5 +421,42 @@ class SIIClient:
         raise NotImplementedError("Pendiente, mismo motivo que get_rcv().")
 
     def get_dte_xml(self, rut_emisor: str, tipo: str, folio: int) -> str:
-        """Trae el XML completo de un documento puntual (para el detalle de ítems)."""
-        raise NotImplementedError("Pendiente, mismo motivo que get_rcv().")
+        """Trae el XML completo de un documento (para el detalle de ítems).
+
+        **Hallazgo (16-sep-2026): esto no parece obtenible desde el portal del SII.**
+        Se recorrieron, con la sesión autenticada, todas las vistas del documento que
+        el RCV ofrece, y ninguna entrega el detalle de ítems ni el XML:
+
+        - `getDetalleCompra` (la tabla del RCV): cabeceras — emisor, folio, fecha, montos.
+        - `verDTE(...)` (el enlace del folio, modal "Detalle Documento Electrónico"):
+          emisor, receptor, tipo, folio, fechas, IVA, monto total, RUT firmante,
+          identificador de envío, documentos referenciados y reparos. **Sin ítems.**
+        - `modTipoCompra(...)` (`complementoscvui/#/detalleDocumento`): sirve para
+          cambiar el tipo de compra; muestra montos, no ítems.
+        - `registrorechazodtej6ui` (Registro de Aceptación o Reclamo): cabecera y
+          eventos de acuse. Sin ítems, y solo cubre tipos 33, 34 y liquidación-factura.
+        - "Exportar Csv" del detalle: las mismas columnas de la tabla.
+
+        Esto es coherente con cómo funciona la facturación electrónica en Chile: el XML
+        completo con el detalle de ítems lo intercambian **emisor y receptor directamente**
+        (eso es justamente el "Intercambio de información"); el SII conserva en el RCV solo
+        los datos de cabecera. Y el Intercambio no está habilitado para este certificado.
+
+        Caminos posibles, a decidir con el dueño del proyecto (ver AGENTS.md, "Pendiente"):
+
+        1. Habilitar "Intercambio de información" en el SII para este certificado.
+        2. Leer los XML desde la casilla de intercambio del contribuyente (los emisores
+           envían el DTE por correo); es el mecanismo estándar y no depende del portal.
+        3. Aceptar trabajar a nivel de cabecera, si a Finnegans le alcanza con el total
+           por documento sin desglose de ítems.
+        4. Contratar un proveedor DTE que ya reciba y almacene los XML.
+
+        Mientras no se resuelva eso, esto falla explícito en vez de devolver datos a medias.
+        """
+        raise NotImplementedError(
+            "El detalle de ítems no está disponible en el portal del SII: el RCV solo "
+            "expone cabeceras (se verificaron getDetalleCompra, verDTE, modTipoCompra, "
+            "el registro de aceptación/reclamo y el export CSV). El XML completo se "
+            "obtiene por intercambio entre emisor y receptor, no desde el portal. "
+            "Ver el docstring de este método para las opciones."
+        )

@@ -220,8 +220,15 @@ automáticas en `http://localhost:8000/docs`.
 - **Alcance de documentos:** TODOS los tipos — facturas afectas (33) y exentas (34),
   notas de crédito (61) y débito (56), guías de despacho (52), boletas (39), y boletas
   de honorarios electrónicas (BHE, sistema separado del RCV en el SII).
-- **Nivel de detalle:** hace falta el XML completo del DTE (detalle de ítems), el
-  resumen del RCV (solo cabecera) no alcanza.
+- **Nivel de detalle:** se había decidido que hacía falta el XML completo del DTE
+  (detalle de ítems) y que la cabecera del RCV no alcanzaba. **Esa decisión quedó
+  bloqueada por una restricción del SII** (16-sep-2026): el portal no expone el detalle
+  de ítems de los documentos recibidos por ningún camino — se verificaron todas las
+  vistas del RCV, el registro de aceptación/reclamo y el export CSV. El XML completo se
+  intercambia directamente entre emisor y receptor ("Intercambio de información", que no
+  está habilitado para este certificado). Ver el docstring de `get_dte_xml()` en
+  `app/sii/client.py` para el detalle y las cuatro opciones posibles. **Hay que decidir
+  esto con el dueño del proyecto antes de seguir.**
 - **Modo de ejecución:** bajo demanda (el usuario abre el portal y/o aprieta
   "Sincronizar"), no desatendido ni programado por cron.
 - **Envío a Finnegans:** siempre manual, el usuario elige qué documentos enviar
@@ -237,8 +244,10 @@ automáticas en `http://localhost:8000/docs`.
 1. ~~Confirmar el login automatizado por navegador~~ **HECHO** (16-sep-2026).
    `login_with_browser()` autentica y lanza `SIIAuthenticationError` si no lo logra.
    Script de prueba manual en `scripts/probar_login_navegador.py`.
-2. **Mapear la navegación real** del RCV y del módulo de BHE dentro de "Mi SII" una
-   vez logueado. Punto de partida ya confirmado: con la sesión iniciada,
+2. ~~Mapear la navegación del RCV~~ **HECHO** (16-sep-2026): `get_rcv()` implementado
+   y verificado contra producción. Falta lo mismo para **BHE**, que es un módulo
+   separado y sigue sin mapear. Y falta resolver el bloqueo del detalle de ítems
+   (ver "Nivel de detalle" arriba). Lo que sigue del punto original: Punto de partida ya confirmado: con la sesión iniciada,
    `https://www4.sii.cl/consdcvinternetui/#/index` abre el Registro de Compras y Ventas
    y presenta un selector con las empresas a las que el RUT tiene acceso (hay 8; la del
    proyecto es 10439188-5) — falta mapear desde ahí los períodos, el detalle y el XML. E
