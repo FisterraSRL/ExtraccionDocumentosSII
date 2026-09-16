@@ -1,0 +1,23 @@
+# Secretos - nunca commitear
+.env
+secrets/
+*.pfx
+*.p12
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Base de datos local
+*.db
+*.sqlite3
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store

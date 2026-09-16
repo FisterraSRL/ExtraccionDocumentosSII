@@ -1,0 +1,8 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0
+pydantic>=2.7
+python-dotenv>=1.0
+cryptography>=42.0
+requests>=2.32
+zeep>=4.2
