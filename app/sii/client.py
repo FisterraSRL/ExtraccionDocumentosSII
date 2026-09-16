@@ -71,10 +71,26 @@ RCV_UI = "https://www4.sii.cl/consdcvinternetui/"
 RCV_SERVICE = RCV_UI + "services/data/facadeService"
 RCV_NAMESPACE = "cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService"
 
+# Portal de Facturación Electrónica (el "sistema de facturación gratuito"). Es un módulo
+# distinto del RCV, con su propia selección de empresa, y es el único lugar del SII donde
+# están los PDF de los documentos recibidos — o sea, el detalle de ítems. Además lista
+# las empresas representadas CON su razón social, cosa que el RCV no hace.
+PORTAL_FE_EMPRESAS = "https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi"
+PORTAL_FE_RECIBIDOS = (
+    "https://www1.sii.cl/cgi-bin/Portal001/mipeAdminDocsRcp.cgi"
+    "?RUT_EMI={rut_emisor}&FOLIO={folio}&RZN_SOC=&FEC_DESDE={desde}&FEC_HASTA={hasta}"
+    "&TPO_DOC=&ESTADO=&ORDEN=&NUM_PAG=1"
+)
+PORTAL_FE_PDF = "https://www1.sii.cl/cgi-bin/Portal001/mipeShowPdf.cgi?CODIGO={codigo}"
+
 SII_AUTH_HOSTS = [
     "https://zeusr.sii.cl",   # portal de autenticación (login humano, certificado o clave)
     "https://palena.sii.cl",  # servicios web de DTE en producción (histórico, a confirmar vigencia)
 ]
+
+
+class SIIPortalFEError(RuntimeError):
+    """Algo falló en el Portal de Facturación Electrónica (empresa no habilitada, PDF ausente)."""
 
 
 class SIIRCVError(RuntimeError):
@@ -298,6 +314,165 @@ class SIIClient:
         return page, context, browser, playwright
 
     # ---------- Pendiente de validar con el resultado de login_with_browser() ----------
+
+    # ---------- Portal de Facturación Electrónica: PDF y razón social ----------
+
+    def get_empresas_con_nombre(self, session=None) -> list[dict]:
+        """Empresas representadas, **con razón social**, desde el Portal de Facturación.
+
+        El RCV solo entrega RUT (su campo de razón social viene null), así que esta es
+        la única fuente de nombres del SII. Ojo: no es la misma lista — acá aparecen las
+        empresas que registraron al titular como usuario del portal de facturación, que
+        pueden ser menos que las que lo autorizaron a consultar el RCV.
+
+        Devuelve [{"rut": "77185459-1", "nombre": "CENTRALIZA SPA"}, ...].
+        """
+        propia = session is None
+        if propia:
+            session = self.login_with_browser(headless=True)
+        page, context, browser, playwright = session
+        try:
+            page.goto(PORTAL_FE_EMPRESAS, wait_until="domcontentloaded", timeout=45000)
+            page.wait_for_timeout(1500)
+            opciones = page.eval_on_selector_all(
+                "select[name=RUT_EMP] option",
+                "els => els.map(e => ({rut: e.value, txt: (e.textContent||'').trim()}))",
+            )
+            empresas = []
+            for o in opciones:
+                rut = (o["rut"] or "").strip()
+                if not rut:
+                    continue
+                # El texto es "RAZON SOCIAL 77025379-9": el RUT va al final.
+                nombre = re.sub(r"\s*" + re.escape(rut) + r"\s*$", "", o["txt"]).strip()
+                empresas.append({"rut": rut, "nombre": nombre or None})
+            return empresas
+        finally:
+            if propia:
+                context.close()
+                browser.close()
+                playwright.stop()
+
+    def _entrar_portal_fe(self, page, rut_empresa: str) -> None:
+        """Selecciona la empresa en el Portal de Facturación (requisito de ese módulo)."""
+        page.goto(PORTAL_FE_EMPRESAS, wait_until="domcontentloaded", timeout=45000)
+        page.wait_for_timeout(1200)
+        disponibles = page.eval_on_selector_all(
+            "select[name=RUT_EMP] option", "els => els.map(e => e.value).filter(Boolean)"
+        )
+        if rut_empresa not in disponibles:
+            raise SIIPortalFEError(
+                f"La empresa {rut_empresa} no está en el Portal de Facturación Electrónica. "
+                "Ahí solo aparecen las empresas que registraron a este usuario en el portal "
+                "de facturación, que son menos que las del RCV. Sin eso no hay PDF."
+            )
+        page.select_option("select[name=RUT_EMP]", rut_empresa)
+        page.click("input[type=submit], button[type=submit]")
+        page.wait_for_load_state("domcontentloaded", timeout=45000)
+        page.wait_for_timeout(800)
+
+    def listar_recibidos_portal(
+        self,
+        rut_empresa: str,
+        desde: str = "",
+        hasta: str = "",
+        session=None,
+        max_paginas: int = 10,
+    ) -> list[dict]:
+        """Grilla "Ver documentos recibidos" del Portal de Facturación Electrónica.
+
+        Cada fila trae un CODIGO interno del SII, que es lo que identifica al documento
+        para pedir su PDF. Las fechas van como **AAAA-MM-DD** (probado: el formato
+        AAAAMMDD devuelve cero filas en silencio) o vacías para traer todo.
+
+        La grilla pagina de a 100 filas; se recorren hasta `max_paginas` para no quedar
+        atrapado si el SII devuelve siempre la misma página.
+
+        Devuelve [{"codigo", "rut_emisor", "razon_social", "documento", "folio",
+                   "fecha", "monto", "estado"}, ...].
+        """
+        propia = session is None
+        if propia:
+            session = self.login_with_browser(headless=True)
+        page, context, browser, playwright = session
+        try:
+            self._entrar_portal_fe(page, rut_empresa)
+            salida: list[dict] = []
+            vistos: set[str] = set()
+            base = PORTAL_FE_RECIBIDOS.format(
+                rut_emisor="", folio="", desde=desde, hasta=hasta
+            )
+            for pagina in range(1, max_paginas + 1):
+                page.goto(
+                    base.replace("NUM_PAG=1", f"NUM_PAG={pagina}"),
+                    wait_until="domcontentloaded",
+                    timeout=60000,
+                )
+                # La grilla la pinta un DataTable después de cargar: sin esta espera a
+                # veces se lee la página con cero filas y parece que no hay documentos.
+                try:
+                    page.wait_for_selector("a[href*='mipeGesDocRcp.cgi']", timeout=15000)
+                except Exception:
+                    break
+                page.wait_for_timeout(500)
+
+                filas = page.eval_on_selector_all(
+                    "a[href*='mipeGesDocRcp.cgi']",
+                    """els => els.map(a => {
+                        const tr = a.closest('tr');
+                        const celdas = tr ? Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim()) : [];
+                        return {href: a.getAttribute('href'), celdas: celdas};
+                    })""",
+                )
+                nuevos = 0
+                for f in filas:
+                    m = re.search(r"CODIGO=(\d+)", f["href"] or "")
+                    c = f["celdas"]
+                    if not m or len(c) < 8 or m.group(1) in vistos:
+                        continue
+                    vistos.add(m.group(1))
+                    nuevos += 1
+                    salida.append({
+                        "codigo": m.group(1),
+                        "rut_emisor": c[1],
+                        "razon_social": c[2],
+                        "documento": c[3],
+                        "folio": c[4],
+                        "fecha": c[5],
+                        "monto": c[6],
+                        "estado": c[7],
+                    })
+                # Última página: el SII repite la anterior en vez de devolver vacío.
+                if nuevos == 0 or len(filas) < 100:
+                    break
+            return salida
+        finally:
+            if propia:
+                context.close()
+                browser.close()
+                playwright.stop()
+
+    def get_pdf_documento(self, codigo: str, session) -> bytes:
+        """Baja la representación impresa (PDF) de un documento recibido.
+
+        `codigo` sale de `listar_recibidos_portal()`. Requiere una sesión que ya haya
+        entrado al Portal de Facturación con la empresa correspondiente.
+        """
+        page, context, browser, playwright = session
+        resp = context.request.get(PORTAL_FE_PDF.format(codigo=codigo), timeout=60000)
+        tipo = resp.headers.get("content-type", "")
+        if resp.status != 200 or "pdf" not in tipo.lower():
+            raise SIIPortalFEError(
+                f"El SII no devolvió un PDF para el documento {codigo}: "
+                f"HTTP {resp.status}, content-type {tipo!r}."
+            )
+        return resp.body()
+
+    def get_items_documento(self, codigo: str, session):
+        """PDF → detalle de ítems. Devuelve un `DetalleDTE` (ver app/sii/pdf_dte.py)."""
+        from app.sii.pdf_dte import extraer_detalle
+
+        return extraer_detalle(self.get_pdf_documento(codigo, session))
 
     def get_empresas(self, session=None) -> list[str]:
         """Lista los RUT de las empresas que este certificado puede consultar en el RCV.

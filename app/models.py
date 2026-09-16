@@ -154,9 +154,16 @@ class Documento(Base):
     tipo_doc_ref: Mapped[str | None] = mapped_column(String(4), nullable=True)
     folio_doc_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Notas (motivo de NC/ND) e ítems (detalle del XML, lista de dicts: desc/cant/precio/subtotal)
+    # Notas (motivo de NC/ND) e ítems (desc/cant/precio/subtotal, leídos del PDF del SII)
     motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
     items: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # Identificador del documento en el Portal de Facturación Electrónica, que es de
+    # donde sale su PDF. Se guarda para poder volver a pedirlo sin rehacer la búsqueda.
+    pdf_codigo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Queda escrito cuando la suma de los ítems no cuadra con los totales del documento
+    # (descuentos globales, otros cobros). El desglose se muestra igual, con la salvedad.
+    items_observacion: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # XML original del DTE, guardado tal cual para trazabilidad (ver requisitos: "guardar
     # el XML original de cada documento como respaldo", dado que no hay notificaciones/alertas
@@ -185,9 +192,11 @@ class Documento(Base):
 
 class ItemSchema(BaseModel):
     desc: str
-    cant: float
-    precio: float
-    subtotal: float
+    # Nulos posibles: hay documentos cuyo PDF no imprime cantidad ni precio unitario.
+    cant: float | None = None
+    precio: float | None = None
+    subtotal: float | None = None
+    codigo: str | None = None
 
 
 class EmpresaOut(BaseModel):
@@ -231,6 +240,7 @@ class DocumentoOut(BaseModel):
     liquido: float | None = None
     motivo: str | None = None
     items: list[ItemSchema] | None = None
+    items_observacion: str | None = None
     estado: EstadoDocumento
     fecha_envio: datetime | None = None
     finnegans_id: str | None = None

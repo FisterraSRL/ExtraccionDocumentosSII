@@ -24,7 +24,12 @@ from app.models import (
     EstadoDocumento,
     SyncResult,
 )
-from app.sii.client import SIIAuthenticationError, SIIClient, SIIRCVError
+from app.sii.client import (
+    SIIAuthenticationError,
+    SIIClient,
+    SIIPortalFEError,
+    SIIRCVError,
+)
 from app.config import settings
 
 router = APIRouter(prefix="/api", tags=["documentos"])
@@ -121,7 +126,14 @@ def refrescar_empresas(db: Session = Depends(get_db)):
 
     client = SIIClient(rut, cert_path, password)
     try:
-        ruts = client.get_empresas()
+        session = client.login_with_browser(headless=True)
+        try:
+            ruts = client.get_empresas(session=session)
+            nombradas = client.get_empresas_con_nombre(session=session)
+        finally:
+            session[1].close()
+            session[2].close()
+            session[3].stop()
     except SIIAuthenticationError as exc:
         raise HTTPException(
             status_code=502, detail=f"No se pudo iniciar sesión en el SII: {exc}"
@@ -131,12 +143,24 @@ def refrescar_empresas(db: Session = Depends(get_db)):
 
     conocidas = {e.rut: e for e in db.execute(select(Empresa)).scalars().all()}
     for r in ruts:
-        if r in conocidas:
-            conocidas[r].autorizada = True
-        else:
-            db.add(Empresa(rut=r, autorizada=True))
+        if r not in conocidas:
+            nueva = Empresa(rut=r, autorizada=True)
+            db.add(nueva)
+            conocidas[r] = nueva
     for r, empresa in conocidas.items():
         empresa.autorizada = r in ruts
+
+    # El RCV no da razones sociales, pero el Portal de Facturación Electrónica sí.
+    # Es una lista más corta (solo las empresas registradas en ese portal), así que
+    # completa los nombres que puede y el resto queda para ponerlos a mano.
+    for e in nombradas:
+        empresa = conocidas.get(e["rut"])
+        if empresa is None:
+            empresa = Empresa(rut=e["rut"], autorizada=True)
+            db.add(empresa)
+            conocidas[e["rut"]] = empresa
+        if e["nombre"] and not empresa.nombre:
+            empresa.nombre = e["nombre"]
     db.commit()
     return listar_empresas(db)
 
@@ -146,6 +170,7 @@ def sincronizar(
     empresa: str | None = None,
     periodo: str | None = None,
     meses: int = 3,
+    con_items: bool = True,
     db: Session = Depends(get_db),
 ):
     """Trae del SII los documentos de compra del RCV y los guarda.
@@ -186,6 +211,8 @@ def sincronizar(
                         else:
                             actualizados += 1
                 _registrar_empresa(db, rut_objetivo, client.nombre_empresa)
+                if con_items:
+                    _completar_items(db, client, session, rut_objetivo, periodos)
             db.commit()
         finally:
             context.close()
@@ -245,6 +272,70 @@ def _empresas_a_sincronizar(db: Session, empresa: str | None, rut_certificado: s
 def _nombre_de(db: Session, rut: str) -> str:
     empresa = db.get(Empresa, rut)
     return empresa.nombre_mostrado if empresa else rut
+
+
+def _completar_items(db: Session, client, session, rut_empresa: str, periodos: list[str]) -> None:
+    """Completa el detalle de ítems leyendo el PDF de cada documento en el Portal FE.
+
+    El RCV no publica los ítems, pero el Portal de Facturación Electrónica sí ofrece la
+    representación impresa de cada documento recibido, y ese PDF lo genera el SII a
+    partir del XML que guarda. Acá se cruzan las dos fuentes: el RCV da las cabeceras y
+    el portal, el desglose.
+
+    Es best-effort a propósito: una empresa puede no estar habilitada en ese portal, un
+    documento puede no estar en la grilla, o un PDF puede no parsearse. Nada de eso debe
+    tumbar la sincronización, que ya trajo las cabeceras — se deja el documento sin
+    ítems y se sigue.
+    """
+    pendientes = db.execute(
+        select(Documento).where(
+            Documento.empresa_rut == rut_empresa,
+            Documento.items.is_(None),
+        )
+    ).scalars().all()
+    if not pendientes:
+        return
+
+    # Un rango que cubra los períodos sincronizados, con margen: el período tributario
+    # del RCV agrupa por recepción y la grilla del portal filtra por emisión, así que
+    # las fechas no calzan exactamente.
+    mas_viejo = min(periodos)
+    anho, mes = int(mas_viejo[:4]), int(mas_viejo[5:7])
+    mes -= 1
+    if mes == 0:
+        mes, anho = 12, anho - 1
+    desde = f"{anho:04d}-{mes:02d}-01"
+    hasta = date.today().isoformat()
+
+    try:
+        recibidos = client.listar_recibidos_portal(
+            rut_empresa, desde=desde, hasta=hasta, session=session
+        )
+    except SIIPortalFEError:
+        # La empresa no está en el Portal de Facturación: no hay PDF que leer.
+        return
+    except Exception:
+        return
+
+    indice = {(_norm_rut(r["rut_emisor"]), str(r["folio"]).strip()): r for r in recibidos}
+
+    for documento in pendientes:
+        fila = indice.get((_norm_rut(documento.proveedor_rut), str(documento.folio)))
+        if not fila:
+            continue
+        try:
+            detalle = client.get_items_documento(fila["codigo"], session)
+        except Exception:
+            continue
+        if not detalle.items:
+            continue
+        documento.items = [i.como_dict() for i in detalle.items]
+        documento.pdf_codigo = fila["codigo"]
+        documento.items_observacion = None if detalle.cuadra else detalle.observacion
+
+
+def _norm_rut(rut: str) -> str:
+    return (rut or "").replace(".", "").replace(" ", "").upper()
 
 
 def _registrar_empresa(db: Session, rut: str, nombre: str | None) -> None:

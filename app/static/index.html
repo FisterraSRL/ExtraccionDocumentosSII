@@ -218,6 +218,8 @@
   /* ---------- Detail panel ---------- */
   tr.detail-row td{background:rgba(255,255,255,.35); padding:0; border-bottom:1px solid rgba(163,171,182,.4);}
   .detail-panel{padding:16px 20px 20px 46px; display:flex; flex-direction:column; gap:12px;}
+  .detail-warn{margin-top:10px;padding:9px 12px;border-radius:9px;font-size:.84rem;
+    background:#fdf3e3;border:1px solid #e8c98a;color:#7a5209;}
   .detail-note{
     font-size:.85rem; color:var(--fs-ink); background:rgba(255,255,255,.6); border:1px solid var(--fs-steel);
     border-radius:10px; padding:9px 13px; font-weight:500;
@@ -587,7 +589,12 @@
   function itemsTableHtml(doc){
     var items = doc.items || [];
     var rows = items.map(function(it){
-      return "<tr><td>" + esc(it.desc) + "</td><td class=\"num mono\">" + it.cant +
+      // cant/precio pueden venir nulos: hay PDF del SII que no imprimen esas columnas.
+      var cant = (it.cant === null || it.cant === undefined)
+        ? "—" : String(it.cant).replace(".", ",");
+      var desc = esc(it.desc || "");
+      if(it.codigo) desc += "<div class=\"mono muted small\">" + esc(it.codigo) + "</div>";
+      return "<tr><td>" + desc + "</td><td class=\"num mono\">" + cant +
         "</td><td class=\"num mono\">" + fmtCLP(it.precio) + "</td><td class=\"num mono\">" + fmtCLP(it.subtotal) + "</td></tr>";
     }).join("");
     var totalsHtml = "";
@@ -610,7 +617,10 @@
     }
     var itemsHtml = items.length
       ? "<table class=\"items-table\"><thead><tr><th>Descripción</th><th class=\"num\">Cant.</th><th class=\"num\">Precio unit.</th><th class=\"num\">Subtotal</th></tr></thead><tbody>" + rows + "</tbody></table>" + totalsHtml
-      : "<div class=\"detail-note\">El SII no publica el detalle de ítems de los documentos recibidos: su Registro de Compras y Ventas solo entrega la cabecera que ves acá. El desglose por producto viaja en el XML que el emisor manda directamente al receptor.</div>" + totalsHtml;
+      : "<div class=\"detail-note\">Sin detalle de ítems. El Registro de Compras y Ventas solo entrega la cabecera; el desglose sale de la representación impresa del documento en el Portal de Facturación Electrónica, y ahí este documento no aparece.</div>" + totalsHtml;
+    if(doc.items_observacion){
+      itemsHtml += "<div class=\"detail-warn\">" + esc(doc.items_observacion) + "</div>";
+    }
     var xmlHtml = doc.xml_original
       ? "<details><summary class=\"link-btn xml-toggle\">Ver XML original</summary><div class=\"xml-box\">" + esc(doc.xml_original) + "</div></details>"
       : "";

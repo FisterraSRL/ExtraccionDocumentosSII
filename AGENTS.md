@@ -173,6 +173,57 @@ logins mientras se desarrollaba esto, ver sección siguiente): `get_empresas()`,
 `get_nombre_empresa()` y la sincronización de varias empresas en una pasada
 (`POST /api/sync?empresa=todas`). El modelo, la API y el portal sí están verificados.
 
+## Detalle de ítems: el Portal de Facturación Electrónica (RESUELTO)
+
+Una versión anterior de este documento daba el detalle de ítems por **imposible** desde
+el portal del SII, porque el RCV solo entrega cabeceras. Eso era cierto del RCV, pero
+**incompleto**: el detalle sí está disponible, en otro módulo.
+
+**Dónde.** Servicios online → Factura electrónica → Sistema de facturación gratuito del
+SII → (elegir empresa) → "Historial de DTE y respuesta a documentos recibidos" → "Ver
+documentos recibidos". Cada fila tiene un `CODIGO` interno y, en el detalle, un enlace
+"VISUALIZACIÓN DOCUMENTO (pdf)".
+
+```
+https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi      selección de empresa
+https://www1.sii.cl/cgi-bin/Portal001/mipeAdminDocsRcp.cgi    grilla de recibidos
+    ?RUT_EMI=&FOLIO=&RZN_SOC=&FEC_DESDE=&FEC_HASTA=&TPO_DOC=&ESTADO=&ORDEN=&NUM_PAG=1
+https://www1.sii.cl/cgi-bin/Portal001/mipeShowPdf.cgi?CODIGO= el PDF del documento
+```
+
+Detalles comprobados: las fechas van en **AAAA-MM-DD** (con AAAAMMDD la grilla devuelve
+cero filas, sin avisar); la grilla pagina de a 100 con `NUM_PAG`; y hay que seleccionar
+la empresa en ese portal antes de consultar, es un contexto propio, distinto del RCV.
+
+**Por qué el PDF es parseable.** Lo genera el propio SII a partir del XML que guarda, así
+que la plantilla es la misma para todos los emisores. `app/sii/pdf_dte.py` lo lee por
+coordenadas (ver su docstring para el método y por qué repartir en columnas fijas no
+funciona). Probado contra Banco de Chile, Entel, Falabella, una estación de servicio, una
+consultora y una aseguradora.
+
+**Lo que hay que saber al usarlo:**
+
+- **No todos los documentos están.** La grilla del Portal FE y el RCV son listas
+  distintas: hay documentos del RCV que no aparecen en el portal, y viceversa. Esos
+  quedan sin ítems, y el portal lo dice explícitamente en vez de simular un desglose.
+- **No todas las empresas están.** Al Portal FE solo entran las que registraron al
+  titular como usuario de ese portal (30 de las 55 del RCV).
+- **Acentos.** En bastantes PDF el SII incrusta las fuentes de modo que los acentos no
+  se pueden mapear y salen como "?" ("asesor?a"). Es del PDF de origen, no del parseo.
+- **Cuadratura.** Se compara la suma de los ítems contra el neto+exento del documento. Si
+  no cuadra (descuentos globales, otros cobros), se guarda la salvedad en
+  `items_observacion` y el portal la muestra; el desglose igual se conserva.
+- Hay emisores que usan líneas de ítem para metadatos ("RUTCOBRANZA 76030712" con valor
+  0). No se filtran: están en el documento.
+
+## Los nombres de las empresas salen del Portal de Facturación
+
+El RCV lista las empresas representadas solo por RUT. El Portal de Facturación
+Electrónica las lista **con razón social**, y de ahí las toma
+`SIIClient.get_empresas_con_nombre()`. Son menos (30 vs 55), así que para el resto sigue
+estando el nombre manual (`PATCH /api/empresas/{rut}`), que siempre manda sobre el
+automático.
+
 ## ⚠️ El SII limita la frecuencia de logins
 
 Observado el 16-sep-2026, después de unas 15 autenticaciones en menos de una hora
@@ -267,15 +318,10 @@ automáticas en `http://localhost:8000/docs`.
 - **Alcance de documentos:** TODOS los tipos — facturas afectas (33) y exentas (34),
   notas de crédito (61) y débito (56), guías de despacho (52), boletas (39), y boletas
   de honorarios electrónicas (BHE, sistema separado del RCV en el SII).
-- **Nivel de detalle:** se había decidido que hacía falta el XML completo del DTE
-  (detalle de ítems) y que la cabecera del RCV no alcanzaba. **Esa decisión quedó
-  bloqueada por una restricción del SII** (16-sep-2026): el portal no expone el detalle
-  de ítems de los documentos recibidos por ningún camino — se verificaron todas las
-  vistas del RCV, el registro de aceptación/reclamo y el export CSV. El XML completo se
-  intercambia directamente entre emisor y receptor ("Intercambio de información", que no
-  está habilitado para este certificado). Ver el docstring de `get_dte_xml()` en
-  `app/sii/client.py` para el detalle y las cuatro opciones posibles. **Hay que decidir
-  esto con el dueño del proyecto antes de seguir.**
+- **Nivel de detalle:** hace falta el detalle de ítems, la cabecera del RCV no alcanza.
+  **RESUELTO** (16-sep-2026): se obtiene del PDF del documento en el Portal de
+  Facturación Electrónica — ver la sección "Detalle de ítems" más abajo, incluidas sus
+  limitaciones (no todos los documentos ni todas las empresas están ahí).
 - **Modo de ejecución:** bajo demanda (el usuario abre el portal y/o aprieta
   "Sincronizar"), no desatendido ni programado por cron.
 - **Envío a Finnegans:** siempre manual, el usuario elige qué documentos enviar
