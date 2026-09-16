@@ -342,8 +342,12 @@ automáticas en `http://localhost:8000/docs`.
   limitaciones (no todos los documentos ni todas las empresas están ahí).
 - **Modo de ejecución:** bajo demanda (el usuario abre el portal y/o aprieta
   "Sincronizar"), no desatendido ni programado por cron.
-- **Envío a Finnegans:** siempre manual, el usuario elige qué documentos enviar
-  (individual o en lote con confirmación) — nunca automático.
+- **Envío a Finnegans:** siempre manual, nunca automático. Desde el 16-sep-2026 el
+  portal tiene **un solo** control de envío, al pie de la bandeja, y está deshabilitado
+  porque el envío todavía no se implementó (falta la documentación de la API de
+  Finnegans). Se quitaron los botones "Enviar" por fila, el de la barra de selección y
+  el "Reintentar" del modal de error: había cuatro caminos de envío para una función que
+  no existe. El endpoint `POST /api/documents/{id}/send` sigue en el backend.
 - **Manejo de errores:** sin notificaciones proactivas (nada de mail/Slack). El
   feedback es en el portal, al momento de sincronizar/enviar, con el error real.
 - **Infraestructura objetivo (más adelante):** en la nube, pero con salida directa a

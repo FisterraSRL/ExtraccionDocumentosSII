@@ -113,6 +113,8 @@
   .empresa-bar select{min-width:min(340px,100%);padding:8px 10px;border-radius:9px;
     border:1px solid rgba(10,47,67,.22);font:inherit;color:#0A2F43;background:#fff;}
   .empresa-meta{color:#5b6b75;font-size:.84rem;}
+  .empresa-aviso{flex-basis:100%; margin-top:2px; padding:9px 12px; border-radius:9px;
+    font-size:.82rem; background:#eef4f8; border:1px solid #c5d8e4; color:#28536b;}
   .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
   .kpi{
     background:rgba(255,255,255,.55); border:var(--fs-hairline); border-radius:16px; padding:14px 16px;
@@ -161,6 +163,12 @@
   .filters .clear-btn:hover{color:var(--fs-ink);}
 
   /* ---------- Bulk bar ---------- */
+  .envio-pie{
+    display:flex; align-items:center; justify-content:flex-end; gap:16px; flex-wrap:wrap;
+    margin-top:18px; padding:16px 18px; border-top:1px solid rgba(10,47,67,.10);
+  }
+  .envio-resumen{color:var(--fs-steel-deep); font-size:.86rem;}
+  .envio-pie .btn:disabled{opacity:.45; cursor:not-allowed;}
   .bulk-bar{
     display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
     background:var(--fs-gradient-chip); border:var(--fs-hairline); border-radius:14px; padding:11px 16px; margin-bottom:14px;
@@ -332,6 +340,7 @@
           </button>
           <span class="empresa-meta" id="empresaMeta"></span>
         </div>
+        <div class="empresa-aviso" id="empresaAviso" hidden></div>
       </div>
   <div class="kpis">
     <div class="kpi pending">
@@ -397,6 +406,14 @@
           </tbody>
         </table>
       </div>
+
+      <div class="envio-pie" id="envioPie">
+        <div class="envio-resumen" id="envioResumen"></div>
+        <button class="btn btn-cta" id="enviarTodoBtn" type="button" disabled
+                title="Todavía no está implementado el envío a Finnegans">
+          Enviar a Finnegans
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -408,7 +425,6 @@
     <div class="modal-error" id="modalError"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="modalCloseBtn" type="button">Cerrar</button>
-      <button class="btn btn-cta" id="modalRetryBtn" type="button">Reintentar envío</button>
     </div>
   </div>
 </div>
@@ -447,7 +463,6 @@
   // Los tableros arrancan en blanco y solo se llenan al sincronizar: asi nunca se
   // confunde lo que se está viendo con la empresa que está elegida.
   var sincronizado = false;
-  var bulkConfirming = false;
   var toastTimer = null;
   var loading = true;
 
@@ -523,6 +538,18 @@
         : "Sin sincronizar todavía";
     } else {
       meta.textContent = "";
+    }
+    // Sin esto, una empresa fuera del Portal de Facturación se ve como decenas de filas
+    // que dicen "sin detalle" sin explicar por qué, y parece que fallara la sincronización.
+    var aviso = document.getElementById("empresaAviso");
+    if(actual && actual.en_portal_fe === false){
+      aviso.hidden = false;
+      aviso.textContent = "Esta empresa no está registrada en el Portal de Facturación " +
+        "Electrónica del SII, que es el único lugar donde están los PDF de los documentos. " +
+        "Sus documentos se sincronizan igual, pero sin detalle de ítems.";
+    } else {
+      aviso.hidden = true;
+      aviso.textContent = "";
     }
   }
 
@@ -676,8 +703,8 @@
       return "<div class=\"estado-cell\"><span class=\"pill error\">Error</span>" +
         "<button class=\"link-btn\" data-action=\"view-error\" data-id=\"" + doc.id + "\">Ver detalle</button></div>";
     }
-    return "<div class=\"estado-cell\"><span class=\"pill pending\">Pendiente</span>" +
-      "<button class=\"link-btn\" data-action=\"send-one\" data-id=\"" + doc.id + "\">Enviar</button></div>";
+    // El envío no va por fila: hay un único botón al pie de la bandeja.
+    return "<div class=\"estado-cell\"><span class=\"pill pending\">Pendiente</span></div>";
   }
 
   function renderTable(){
@@ -733,6 +760,18 @@
     renderBulkBar();
   }
 
+  function renderEnvioPie(){
+    var pendientes = docs.filter(function(d){ return d.estado === "pendiente"; });
+    var suma = pendientes.reduce(function(s, d){ return s + d.total; }, 0);
+    document.getElementById("envioResumen").textContent = !sincronizado
+      ? ""
+      : (pendientes.length === 0
+          ? "No hay documentos pendientes de envío."
+          : pendientes.length + " documento" + (pendientes.length === 1 ? "" : "s") +
+            " pendiente" + (pendientes.length === 1 ? "" : "s") + " · " + fmtCLP(suma) +
+            " · el envío a Finnegans todavía no está implementado");
+  }
+
   function renderBulkBar(){
     var bar = document.getElementById("bulkBar");
     var n = selected.size;
@@ -744,22 +783,13 @@
     bar.hidden = false;
     var sum = docs.filter(function(d){ return selected.has(d.id); }).reduce(function(s,d){ return s + d.total; }, 0);
 
-    if(!bulkConfirming){
-      bar.innerHTML =
-        "<div><strong>" + n + "</strong> documento" + (n === 1 ? "" : "s") + " seleccionado" + (n === 1 ? "" : "s") +
-        " <span class=\"muted\">· " + fmtCLP(sum) + "</span></div>" +
-        "<div class=\"bulk-actions\">" +
-        "<button class=\"btn btn-ghost\" data-action=\"clear-selection\" type=\"button\">Cancelar selección</button>" +
-        "<button class=\"btn btn-cta\" data-action=\"bulk-send\" type=\"button\">Enviar a Finnegans</button>" +
-        "</div>";
-    } else {
-      bar.innerHTML =
-        "<div>¿Confirmar envío de <strong>" + n + "</strong> documento" + (n === 1 ? "" : "s") + " por <strong>" + fmtCLP(sum) + "</strong>?</div>" +
-        "<div class=\"bulk-actions\">" +
-        "<button class=\"btn btn-ghost\" data-action=\"bulk-cancel\" type=\"button\">Volver</button>" +
-        "<button class=\"btn btn-cta\" data-action=\"bulk-confirm\" type=\"button\">Confirmar envío</button>" +
-        "</div>";
-    }
+    bar.innerHTML =
+      "<div><strong>" + n + "</strong> documento" + (n === 1 ? "" : "s") +
+      " seleccionado" + (n === 1 ? "" : "s") +
+      " <span class=\"muted\">· " + fmtCLP(sum) + "</span></div>" +
+      "<div class=\"bulk-actions\">" +
+      "<button class=\"btn btn-ghost\" data-action=\"clear-selection\" type=\"button\">Cancelar selección</button>" +
+      "</div>";
   }
 
   function updateTabsUI(){
@@ -772,6 +802,7 @@
     renderTipoFilter();
     renderKpis();
     renderTable();
+    renderEnvioPie();
     updateTabsUI();
   }
 
@@ -798,7 +829,7 @@
     icon.innerHTML = "<span class=\"spinner\"></span>";
     label.textContent = "Sincronizando con SII…";
 
-    apiFetch("/api/sync" + (empresaActual ? "?empresa=" + encodeURIComponent(empresaActual) : ""),
+    apiFetch("/api/sync?con_items=true" + (empresaActual ? "&empresa=" + encodeURIComponent(empresaActual) : ""),
              { method: "POST" }).then(function(r){
       if(r.ok){
         showToast(r.data.mensaje || ("Sincronización completa: " + (r.data.documentos_nuevos || 0) + " nuevos"));
@@ -824,74 +855,12 @@
     });
   }
 
-  function sendOne(id){
-    var doc = docs.find(function(d){ return d.id === id; });
-    if(!doc) return Promise.resolve();
-    doc.estado = "enviando";
-    renderAll();
-    return apiFetch("/api/documents/" + id + "/send", { method: "POST" }).then(function(r){
-      if(r.ok && r.data.estado === "enviado"){
-        showToast("Documento enviado a Finnegans");
-        return loadEmpresas().then(loadDocuments);
-      } else if(r.ok){
-        // el backend proceso el envio pero quedo en error (p.ej. Finnegans lo rechazo)
-        return loadDocuments().then(function(){
-          showToast("Finnegans rechazó el documento — ver detalle en la fila.", true);
-        });
-      } else {
-        return loadDocuments().then(function(){
-          showToast("No se pudo enviar: " + (r.data.detail || ("error " + r.status)), true);
-        });
-      }
-    }).catch(function(){
-      return loadDocuments().then(function(){
-        showToast("No se pudo conectar con el backend local.", true);
-      });
-    });
-  }
-
-  function handleBulkConfirm(){
-    var ids = Array.from(selected);
-    bulkConfirming = false;
-    ids.forEach(function(id){
-      var doc = docs.find(function(d){ return d.id === id; });
-      if(doc) doc.estado = "enviando";
-    });
-    renderAll();
-
-    var okCount = 0, failCount = 0, lastErr = null;
-
-    function sendNext(i){
-      if(i >= ids.length){
-        selected.clear();
-        return loadDocuments().then(function(){
-          if(failCount === 0){
-            showToast(okCount + " documento" + (okCount === 1 ? "" : "s") + " enviado" + (okCount === 1 ? "" : "s") + " a Finnegans");
-          } else {
-            showToast(okCount + " enviado(s), " + failCount + " con error" + (lastErr ? (": " + lastErr) : ""), true);
-          }
-        });
-      }
-      return apiFetch("/api/documents/" + ids[i] + "/send", { method: "POST" }).then(function(r){
-        if(r.ok && r.data.estado === "enviado"){ okCount++; }
-        else { failCount++; lastErr = (r.data && r.data.detail) || ("error " + r.status); }
-      }).catch(function(){
-        failCount++; lastErr = "no se pudo conectar con el backend";
-      }).then(function(){
-        return sendNext(i + 1);
-      });
-    }
-
-    return sendNext(0);
-  }
-
   function openErrorModal(id){
     var doc = docs.find(function(d){ return d.id === id; });
     if(!doc) return;
     document.getElementById("modalMeta").innerHTML =
       esc(doc.tipo_nombre || doc.tipo) + " · Folio " + doc.folio + "<br>" + esc(doc.proveedor_nombre) + " · " + esc(doc.proveedor_rut);
     document.getElementById("modalError").textContent = doc.error_detalle || "Error no especificado.";
-    document.getElementById("modalRetryBtn").setAttribute("data-id", id);
     document.getElementById("modalOverlay").hidden = false;
   }
   function closeErrorModal(){
@@ -909,8 +878,6 @@
     if(action === "toggle"){
       if(expanded.has(id)) expanded.delete(id); else expanded.add(id);
       renderTable();
-    } else if(action === "send-one"){
-      sendOne(id);
     } else if(action === "view-error"){
       openErrorModal(id);
     }
@@ -939,13 +906,7 @@
     if(!btn) return;
     var action = btn.getAttribute("data-action");
     if(action === "clear-selection"){
-      selected.clear(); bulkConfirming = false; renderTable();
-    } else if(action === "bulk-send"){
-      bulkConfirming = true; renderBulkBar();
-    } else if(action === "bulk-cancel"){
-      bulkConfirming = false; renderBulkBar();
-    } else if(action === "bulk-confirm"){
-      handleBulkConfirm();
+      selected.clear(); renderTable();
     }
   });
 
@@ -999,11 +960,6 @@
   document.getElementById("modalCloseBtn").addEventListener("click", closeErrorModal);
   document.getElementById("modalOverlay").addEventListener("click", function(e){
     if(e.target.id === "modalOverlay") closeErrorModal();
-  });
-  document.getElementById("modalRetryBtn").addEventListener("click", function(e){
-    var id = parseInt(e.target.getAttribute("data-id"), 10);
-    closeErrorModal();
-    sendOne(id);
   });
   document.addEventListener("keydown", function(e){
     if(e.key === "Escape" && !document.getElementById("modalOverlay").hidden) closeErrorModal();

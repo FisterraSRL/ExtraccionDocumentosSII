@@ -88,6 +88,7 @@ def listar_empresas(db: Session = Depends(get_db)):
             nombre=e.nombre,
             nombre_mostrado=e.nombre_mostrado,
             autorizada=e.autorizada,
+            en_portal_fe=e.en_portal_fe,
             ultima_sincronizacion=e.ultima_sincronizacion,
             documentos=conteos.get(e.rut, 0),
             pendientes=pendientes.get(e.rut, 0),
@@ -159,6 +160,7 @@ def refrescar_empresas(db: Session = Depends(get_db)):
     # El RCV no da razones sociales, pero el Portal de Facturación Electrónica sí.
     # Es una lista más corta (solo las empresas registradas en ese portal), así que
     # completa los nombres que puede y el resto queda para ponerlos a mano.
+    en_fe = {e["rut"] for e in nombradas}
     for e in nombradas:
         empresa = conocidas.get(e["rut"])
         if empresa is None:
@@ -167,6 +169,8 @@ def refrescar_empresas(db: Session = Depends(get_db)):
             conocidas[e["rut"]] = empresa
         if e["nombre"] and not empresa.nombre:
             empresa.nombre = e["nombre"]
+    for r, empresa in conocidas.items():
+        empresa.en_portal_fe = r in en_fe
     db.commit()
     return listar_empresas(db)
 
@@ -321,13 +325,17 @@ def _completar_items(db: Session, client, session, rut_empresa: str, periodos: l
     desde = f"{anho:04d}-{mes:02d}-01"
     hasta = date.today().isoformat()
 
+    empresa = db.get(Empresa, rut_empresa)
     try:
         recibidos = client.listar_recibidos_portal(
             rut_empresa, desde=desde, hasta=hasta, session=session
         )
     except SIIPortalFEError as exc:
-        # La empresa no está en el Portal de Facturación: no hay PDF que leer.
+        # La empresa no está en el Portal de Facturación: no hay PDF que leer. Se deja
+        # anotado para que el portal pueda explicarlo en vez de mostrar filas mudas.
         log.info("Sin detalle de ítems para %s: %s", rut_empresa, exc)
+        if empresa:
+            empresa.en_portal_fe = False
         return
     except Exception:
         # Best-effort: la sincronización ya trajo las cabeceras y no debe caerse por
@@ -335,6 +343,8 @@ def _completar_items(db: Session, client, session, rut_empresa: str, periodos: l
         log.exception("Falló el listado del Portal FE para %s", rut_empresa)
         return
 
+    if empresa:
+        empresa.en_portal_fe = True
     indice = {(_norm_rut(r["rut_emisor"]), str(r["folio"]).strip()): r for r in recibidos}
 
     for documento in pendientes:

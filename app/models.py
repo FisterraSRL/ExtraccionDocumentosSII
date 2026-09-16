@@ -105,6 +105,11 @@ class Empresa(Base):
     nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # False cuando el SII deja de listarla: se conserva para no perder sus documentos.
     autorizada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # ¿Está en el Portal de Facturación Electrónica? Ahí viven los PDF, o sea el detalle
+    # de ítems. Solo 30 de las 55 empresas del RCV lo están, y para el resto no hay
+    # desglose posible: conviene decirlo una vez y no dejar filas sin explicación.
+    # None = todavía no se comprobó.
+    en_portal_fe: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     ultima_sincronizacion: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     @property
@@ -204,6 +209,7 @@ class EmpresaOut(BaseModel):
     nombre: str | None = None
     nombre_mostrado: str
     autorizada: bool
+    en_portal_fe: bool | None = None
     ultima_sincronizacion: datetime | None = None
     documentos: int = 0
     pendientes: int = 0
