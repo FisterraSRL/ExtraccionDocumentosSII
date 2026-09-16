@@ -31,7 +31,7 @@ app/
   finnegans/
     client.py         → FinnegansClient: stub pendiente de la documentación de su API
   routers/
-    documents.py       → endpoints /api/documents, /api/sync, /api/documents/{id}/send, /api/documents/{id}/retry
+    documents.py       → endpoints /api/documents, /api/sync, /api/documents/{id}/send
 scripts/
   test_sii_connection.py → primer script a correr apenas tengamos el certificado: valida que el .pfx cargue y que el SII acepte la autenticación por certificado.
 ```

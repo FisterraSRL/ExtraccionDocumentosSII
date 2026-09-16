@@ -11,7 +11,7 @@ import enum
 from datetime import date, datetime
 
 from pydantic import BaseModel
-from sqlalchemy import JSON, Date, DateTime, Enum, Float, Integer, String, Text
+from sqlalchemy import JSON, Date, DateTime, Enum, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -34,16 +34,29 @@ class EstadoDocumento(str, enum.Enum):
     ERROR = "error"
 
 
+def _por_valor(enum_class) -> list[str]:
+    """SQLAlchemy persiste por defecto el NOMBRE del miembro del enum ("FACTURA_AFECTA"),
+    no su valor ("33"). Como el valor es el código real del SII —y es lo que viaja por la
+    API y usa el portal— guardamos el valor en la base: así `?tipo=33` filtra sin traducir
+    nada en el medio."""
+    return [m.value for m in enum_class]
+
+
 class Documento(Base):
     """Un documento traído del SII (RCV o BHE), con su detalle completo y su estado de envío."""
 
     __tablename__ = "documentos"
+    __table_args__ = (
+        UniqueConstraint("tipo", "folio", "proveedor_rut", name="uq_documento_sii"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Identificación en el SII — folio + tipo + RUT emisor deben ser únicos entre sí,
     # es la clave natural para no duplicar un documento ya sincronizado.
-    tipo: Mapped[TipoDocumento] = mapped_column(Enum(TipoDocumento), nullable=False)
+    tipo: Mapped[TipoDocumento] = mapped_column(
+        Enum(TipoDocumento, values_callable=_por_valor), nullable=False
+    )
     folio: Mapped[int] = mapped_column(Integer, nullable=False)
     proveedor_rut: Mapped[str] = mapped_column(String(12), nullable=False)
     proveedor_nombre: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -72,7 +85,9 @@ class Documento(Base):
 
     # Estado de envío a Finnegans
     estado: Mapped[EstadoDocumento] = mapped_column(
-        Enum(EstadoDocumento), nullable=False, default=EstadoDocumento.PENDIENTE
+        Enum(EstadoDocumento, values_callable=_por_valor),
+        nullable=False,
+        default=EstadoDocumento.PENDIENTE,
     )
     fecha_envio: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finnegans_id: Mapped[str | None] = mapped_column(String(100), nullable=True)  # id del comprobante ya creado en Finnegans

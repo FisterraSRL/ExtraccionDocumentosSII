@@ -6,13 +6,22 @@ lote, seleccionado por el usuario — el envío nunca es automático, ver requis
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.finnegans.client import FinnegansClient, FinnegansConfigError
-from app.models import Documento, DocumentoOut, EnviarResult, EstadoDocumento, SyncResult
+from app.models import (
+    Documento,
+    DocumentoOut,
+    EnviarResult,
+    EstadoDocumento,
+    SyncResult,
+    TipoDocumento,
+)
 from app.sii.client import SIIClient
 from app.config import settings
 
@@ -22,7 +31,7 @@ router = APIRouter(prefix="/api", tags=["documentos"])
 @router.get("/documents", response_model=list[DocumentoOut])
 def listar_documentos(
     estado: EstadoDocumento | None = None,
-    tipo: str | None = None,
+    tipo: TipoDocumento | None = None,
     q: str | None = None,
     db: Session = Depends(get_db),
 ):
@@ -86,6 +95,7 @@ def enviar_documento(documento_id: int, db: Session = Depends(get_db)):
         documento.estado = EstadoDocumento.ENVIADO
         documento.finnegans_id = resultado.finnegans_id
         documento.error_detalle = None
+        documento.fecha_envio = datetime.now(timezone.utc)
     else:
         documento.estado = EstadoDocumento.ERROR
         documento.error_detalle = resultado.error_detalle
