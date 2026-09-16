@@ -101,7 +101,11 @@
   }
 
   /* ---------- KPI ---------- */
-  .empresa-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 18px;
+  .empresa-paso{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .paso-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+    border-radius:50%;background:#0A2F43;color:#fff;font-size:.74rem;font-weight:700;flex:none;}
+  .empresa-bar #syncBtn:disabled{opacity:.45;cursor:not-allowed;}
+  .empresa-bar{display:flex;align-items:center;gap:12px 26px;flex-wrap:wrap;margin:0 0 18px;
     padding:14px 16px;background:var(--surface,#fff);border:1px solid rgba(10,47,67,.10);
     border-radius:14px;}
   .empresa-bar label{font-weight:700;color:#0A2F43;font-size:.82rem;letter-spacing:.04em;
@@ -297,21 +301,24 @@
       <div class="subtitle">Revisá lo que llegó del SII y elegí qué mandar a Finnegans.</div>
       <span class="conn-tag loading" id="connTag"><span class="conn-dot"></span><span id="connTagText">Conectando con el backend…</span></span>
     </div>
-    <div class="sync-block">
-      <button class="btn btn-cta" id="syncBtn" type="button">
-        <span id="syncIcon">↻</span><span id="syncLabel">Sincronizar con SII</span>
-      </button>
-      <div class="sync-meta" id="syncMeta">Sin sincronizar todavía</div>
-    </div>
   </div>
 
       <div class="empresa-bar">
-        <label for="empresaSelect">Empresa</label>
-        <select id="empresaSelect" aria-label="Empresa a consultar">
-          <option value="">Cargando empresas…</option>
-        </select>
-        <button class="link-btn" id="renombrarBtn" type="button" title="El SII no entrega el nombre, solo el RUT">Ponerle nombre</button>
-        <span class="empresa-meta" id="empresaMeta"></span>
+        <div class="empresa-paso">
+          <span class="paso-num">1</span>
+          <label for="empresaSelect">Elegí la empresa</label>
+          <select id="empresaSelect" aria-label="Empresa a consultar">
+            <option value="">Cargando empresas…</option>
+          </select>
+          <button class="link-btn" id="renombrarBtn" type="button" title="El SII entrega solo el RUT, no el nombre">Ponerle nombre</button>
+        </div>
+        <div class="empresa-paso">
+          <span class="paso-num">2</span>
+          <button class="btn btn-cta" id="syncBtn" type="button" disabled>
+            <span id="syncIcon">↻</span><span id="syncLabel">Sincronizar con SII</span>
+          </button>
+          <span class="empresa-meta" id="empresaMeta"></span>
+        </div>
       </div>
   <div class="kpis">
     <div class="kpi pending">
@@ -424,6 +431,9 @@
   var filters = { estado:"todos", tipo:"todos", q:"" };
   var empresas = [];
   var empresaActual = localStorage.getItem("empresaActual") || "";
+  // Los tableros arrancan en blanco y solo se llenan al sincronizar: asi nunca se
+  // confunde lo que se está viendo con la empresa que está elegida.
+  var sincronizado = false;
   var bulkConfirming = false;
   var toastTimer = null;
   var loading = true;
@@ -447,16 +457,34 @@
     label.textContent = text;
   }
 
+  function limpiarTableros(){
+    docs = [];
+    sincronizado = false;
+    loading = false;
+    selected.clear();
+    expanded.clear();
+    filters.estado = "todos";
+    filters.tipo = "todos";
+    renderEmpresas();
+    renderAll();
+    actualizarBotonSync();
+  }
+
+  function actualizarBotonSync(){
+    var btn = document.getElementById("syncBtn");
+    btn.disabled = !empresaActual;
+    btn.title = empresaActual ? "" : "Elegí una empresa primero";
+  }
+
   function loadEmpresas(){
     return apiFetch("/api/empresas").then(function(r){
       empresas = (r.ok && r.data) ? r.data : [];
       // Si la empresa recordada ya no está, caer en la primera con documentos.
-      var existe = empresas.some(function(e){ return e.rut === empresaActual; });
-      if(!existe){
-        var conDocs = empresas.filter(function(e){ return e.documentos > 0; });
-        empresaActual = (conDocs[0] || empresas[0] || {}).rut || "";
+      if(!empresas.some(function(e){ return e.rut === empresaActual; })){
+        empresaActual = "";
       }
       renderEmpresas();
+      actualizarBotonSync();
     });
   }
 
@@ -467,7 +495,8 @@
       document.getElementById("empresaMeta").textContent = "";
       return;
     }
-    sel.innerHTML = empresas.map(function(e){
+    var placeholder = empresaActual ? "" : "<option value=\"\" selected>Elegí una empresa…</option>";
+    sel.innerHTML = placeholder + empresas.map(function(e){
       var etiqueta = e.nombre_mostrado + (e.nombre ? " · " + e.rut : "");
       if(e.documentos) etiqueta += "  (" + e.documentos + ")";
       return "<option value=\"" + esc(e.rut) + "\"" + (e.rut === empresaActual ? " selected" : "") +
@@ -538,18 +567,21 @@
   }
 
   function renderKpis(){
+    // Sin sincronizar se muestra "–", no "0": un cero afirmaría que la empresa no tiene
+    // documentos, y lo que pasa es que todavía no se consultó al SII.
+    var enBlanco = loading || !sincronizado;
     var pending = docs.filter(function(d){ return d.estado === "pendiente"; });
     var sent = docs.filter(function(d){ return d.estado === "enviado"; });
     var errors = docs.filter(function(d){ return d.estado === "error"; });
     var pendingSum = pending.reduce(function(s,d){ return s + d.total; }, 0);
     var totalSum = docs.reduce(function(s,d){ return s + d.total; }, 0);
 
-    document.getElementById("kpiPendingCount").textContent = loading ? "–" : pending.length;
-    document.getElementById("kpiPendingSum").textContent = loading ? "–" : (fmtCLP(pendingSum) + " en total");
-    document.getElementById("kpiSentCount").textContent = loading ? "–" : sent.length;
-    document.getElementById("kpiErrorCount").textContent = loading ? "–" : errors.length;
-    document.getElementById("kpiTotalCount").textContent = loading ? "–" : docs.length;
-    document.getElementById("kpiTotalSum").textContent = loading ? "–" : fmtCLP(totalSum);
+    document.getElementById("kpiPendingCount").textContent = enBlanco ? "–" : pending.length;
+    document.getElementById("kpiPendingSum").textContent = enBlanco ? "–" : (fmtCLP(pendingSum) + " en total");
+    document.getElementById("kpiSentCount").textContent = enBlanco ? "–" : sent.length;
+    document.getElementById("kpiErrorCount").textContent = enBlanco ? "–" : errors.length;
+    document.getElementById("kpiTotalCount").textContent = enBlanco ? "–" : docs.length;
+    document.getElementById("kpiTotalSum").textContent = enBlanco ? "–" : fmtCLP(totalSum);
   }
 
   function itemsTableHtml(doc){
@@ -620,9 +652,16 @@
     var visible = getVisibleDocs();
 
     if(visible.length === 0){
-      var msg = docs.length === 0
-        ? "No hay documentos en la bandeja todavía. Usá \"Sincronizar con SII\" para traer los pendientes."
-        : "No hay documentos que coincidan con los filtros actuales.";
+      var msg;
+      if(!sincronizado){
+        msg = empresaActual
+          ? "Elegiste una empresa. Apretá \"Sincronizar con SII\" para traer sus documentos."
+          : "Elegí una empresa para empezar.";
+      } else {
+        msg = docs.length === 0
+          ? "El SII no devolvió documentos para esta empresa en el período consultado."
+          : "No hay documentos que coincidan con los filtros actuales.";
+      }
       tbody.innerHTML = "<tr><td colspan=\"7\"><div class=\"empty-state\">" + msg + "</div></td></tr>";
       renderBulkBar();
       return;
@@ -710,6 +749,10 @@
   // ---------- Acciones ----------
 
   function handleSync(){
+    if(!empresaActual){
+      showToast("Elegí una empresa antes de sincronizar.", true);
+      return;
+    }
     var btn = document.getElementById("syncBtn");
     var label = document.getElementById("syncLabel");
     var icon = document.getElementById("syncIcon");
@@ -720,19 +763,26 @@
     apiFetch("/api/sync" + (empresaActual ? "?empresa=" + encodeURIComponent(empresaActual) : ""),
              { method: "POST" }).then(function(r){
       if(r.ok){
-        document.getElementById("syncMeta").textContent = "Última sincronización: hace instantes";
         showToast(r.data.mensaje || ("Sincronización completa: " + (r.data.documentos_nuevos || 0) + " nuevos"));
+        sincronizado = true;
+        // renderEmpresas() escribe la fecha de última sincronización que devuelve el backend.
         return loadEmpresas().then(loadDocuments);
-      } else {
-        document.getElementById("syncMeta").textContent = "Última sincronización: falló (ver aviso)";
-        showToast("No se pudo sincronizar: " + (r.data.detail || ("error " + r.status)), true);
       }
-    }).catch(function(){
-      showToast("No se pudo conectar con el backend local. ¿Está corriendo \"uvicorn app.main:app --reload\"?", true);
+      document.getElementById("empresaMeta").textContent = "Última sincronización: falló";
+      showToast("No se pudo sincronizar: " + (r.data.detail || ("error " + r.status)), true);
+    }).catch(function(err){
+      // No dar por sentado que todo fallo es de red: un error de JavaScript acá caía en
+      // este mismo catch y se reportaba como "el backend no responde", que era falso y
+      // mandaba a diagnosticar el lugar equivocado.
+      var esDeRed = (err instanceof TypeError) && /fetch|network|Failed/i.test(err.message || "");
+      console.error("Fallo al sincronizar:", err);
+      showToast(esDeRed
+        ? "No se pudo conectar con el backend local. ¿Está corriendo \"uvicorn app.main:app --reload\"?"
+        : "Error inesperado en el portal al sincronizar: " + (err && err.message ? err.message : err), true);
     }).then(function(){
-      btn.disabled = false;
       icon.textContent = "↻";
       label.textContent = "Sincronizar con SII";
+      actualizarBotonSync();
     });
   }
 
@@ -876,9 +926,7 @@
   document.getElementById("empresaSelect").addEventListener("change", function(e){
     empresaActual = e.target.value;
     try { localStorage.setItem("empresaActual", empresaActual); } catch(err){}
-    selected.clear(); expanded.clear();
-    renderEmpresas();
-    loadDocuments();
+    limpiarTableros();
   });
 
   document.getElementById("renombrarBtn").addEventListener("click", function(){
@@ -924,7 +972,7 @@
   });
 
   renderAll();
-  loadEmpresas().then(loadDocuments);
+  loadEmpresas().then(limpiarTableros);
 })();
 </script>
 
