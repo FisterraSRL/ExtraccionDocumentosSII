@@ -1,10 +1,14 @@
 # Secretos - nunca commitear
 .env
+.env.*
+!.env.example
 secrets/
 *.pfx
 *.p12
 *.key
 *.pem
+PASS.txt
+Certificado digital/
 
 # Python
 __pycache__/
@@ -21,3 +25,6 @@ venv/
 .vscode/
 .idea/
 .DS_Store
+
+# Bundle de respaldo del historial (redundante una vez que el repo existe)
+*.bundle
