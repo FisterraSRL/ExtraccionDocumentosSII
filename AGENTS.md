@@ -147,6 +147,27 @@ internet sin proxy interceptor" queda **sin fundamento confirmado** — se deriv
 hipótesis descartada. Habrá que reprobarlo en el entorno de destino, pero ya no es una
 restricción conocida a la hora de elegir hosting.
 
+## ⚠️ El SII limita la frecuencia de logins
+
+Observado el 16-sep-2026, después de unas 15 autenticaciones en menos de una hora
+durante el mapeo del RCV: el login empezó a terminar en
+`https://www.sii.cl/servicios_online/1943-1945.html` (una página de ayuda) en vez de
+iniciar sesión, de forma consistente, con el mismo certificado y el mismo flujo que
+venían funcionando. Se descartó que el mecanismo hubiera cambiado: la página
+`IngresoCertificado.html` seguía teniendo el `confirm()` y el formulario a
+`herculesr.sii.cl`, y el handshake TLS mutuo con ese host seguía respondiendo 200.
+
+No está confirmado con el SII, pero la explicación que encaja es una limitación por
+frecuencia. `login_with_browser()` detecta ese redirect y lo reporta con un mensaje
+específico en vez del error genérico.
+
+**Consecuencias de diseño, a tener en cuenta:**
+
+- Reusar una sesión abierta para varias consultas. `get_rcv()` ya acepta `session=`
+  justamente para eso, y `POST /api/sync` hace un solo login para todos los períodos.
+- No poner reintentos automáticos de login: empeoran el bloqueo.
+- Si aparece durante el desarrollo, esperar un rato antes de volver a probar.
+
 ## Certificado y credenciales — SEGURIDAD
 
 `secrets/certificado.pfx` es un **certificado digital de producción real**, no un

@@ -266,6 +266,21 @@ class SIIClient:
             rut_plano = self.rut.replace(".", "").replace("-", "")
             autenticado = "Cerrar Sesión" in texto or rut_plano[:8] in texto.replace(".", "").replace("-", "")
             if not autenticado:
+                # El SII parece limitar la frecuencia de autenticaciones: tras una docena
+                # de logins en menos de una hora empezó a mandar a esta página de ayuda,
+                # de forma consistente, con el mismo certificado y el mismo flujo que
+                # venían funcionando (el handshake TLS con herculesr seguía bien). No está
+                # confirmado con el SII, pero es la explicación que encaja.
+                if "servicios_online/1943" in page.url:
+                    raise SIIAuthenticationError(
+                        "El SII redirigió a su página de ayuda de autenticación en vez de "
+                        f"iniciar sesión ({page.url}). Lo más probable es que esté limitando "
+                        "la frecuencia de logins con este certificado: pasa después de "
+                        "varias autenticaciones seguidas y se resuelve solo esperando. "
+                        "Conviene reusar una sesión abierta en vez de loguear por cada "
+                        "consulta. Si persiste después de un rato, revisar la vigencia del "
+                        "certificado en el SII."
+                    )
                 raise SIIAuthenticationError(
                     "El flujo de login terminó sin sesión iniciada. "
                     f"URL final: {page.url}. Primeros 300 caracteres de la página: "

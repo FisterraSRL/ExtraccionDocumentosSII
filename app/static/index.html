@@ -335,17 +335,6 @@
           </div>
           <select id="tipoFilter" aria-label="Filtrar por tipo de documento">
             <option value="todos">Todos los documentos</option>
-            <optgroup label="Registro de Compras y Ventas">
-              <option value="33">Factura afecta</option>
-              <option value="34">Factura exenta</option>
-              <option value="61">Nota de crédito</option>
-              <option value="56">Nota de débito</option>
-              <option value="52">Guía de despacho</option>
-              <option value="39">Boleta</option>
-            </optgroup>
-            <optgroup label="Honorarios">
-              <option value="BHE">Boleta de honorarios</option>
-            </optgroup>
           </select>
           <button class="clear-btn" id="clearFiltersBtn" type="button">Limpiar filtros</button>
         </div>
@@ -395,10 +384,6 @@
 
   var API = ""; // mismo origen: el backend sirve este archivo
 
-  var TIPO_LABEL = {
-    "33":"Factura afecta", "34":"Factura exenta", "61":"Nota de crédito",
-    "56":"Nota de débito", "52":"Guía de despacho", "39":"Boleta", "BHE":"Boleta de honorarios"
-  };
   var MESES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
 
   function fmtCLP(n){
@@ -478,6 +463,23 @@
     });
   }
 
+  function renderTipoFilter(){
+    var sel = document.getElementById("tipoFilter");
+    var presentes = {};
+    docs.forEach(function(d){ presentes[d.tipo] = d.tipo_nombre || d.tipo; });
+    var codigos = Object.keys(presentes).sort(function(a, b){
+      return presentes[a].localeCompare(presentes[b], "es");
+    });
+    var actual = filters.tipo;
+    sel.innerHTML = "<option value=\"todos\">Todos los documentos</option>" +
+      codigos.map(function(c){
+        return "<option value=\"" + esc(c) + "\">" + esc(presentes[c]) + "</option>";
+      }).join("");
+    // Si el tipo filtrado ya no está en la bandeja, volver a "todos".
+    sel.value = presentes[actual] ? actual : "todos";
+    filters.tipo = sel.value;
+  }
+
   function renderKpis(){
     var pending = docs.filter(function(d){ return d.estado === "pendiente"; });
     var sent = docs.filter(function(d){ return d.estado === "enviado"; });
@@ -501,22 +503,25 @@
     }).join("");
     var totalsHtml = "";
     if(doc.neto !== null && doc.neto !== undefined){
-      totalsHtml =
-        "<div class=\"totals-line\"><span class=\"muted\">Neto</span><b>" + fmtCLP(doc.neto) + "</b></div>" +
-        "<div class=\"totals-line\"><span class=\"muted\">IVA</span><b>" + fmtCLP(doc.iva) + "</b></div>" +
-        "<div class=\"totals-line\"><span class=\"muted\">Total</span><b>" + fmtCLP(doc.total) + "</b></div>";
-    } else {
-      totalsHtml = "<div class=\"totals-line\"><span class=\"muted\">Monto referencial</span><b>" + fmtCLP(doc.total) + "</b></div>";
+      totalsHtml += "<div class=\"totals-line\"><span class=\"muted\">Neto</span><b>" + fmtCLP(doc.neto) + "</b></div>";
     }
+    if(doc.exento){
+      totalsHtml += "<div class=\"totals-line\"><span class=\"muted\">Exento</span><b>" + fmtCLP(doc.exento) + "</b></div>";
+    }
+    if(doc.iva !== null && doc.iva !== undefined){
+      totalsHtml += "<div class=\"totals-line\"><span class=\"muted\">IVA</span><b>" + fmtCLP(doc.iva) + "</b></div>";
+    }
+    totalsHtml += "<div class=\"totals-line\"><span class=\"muted\">Total</span><b>" + fmtCLP(doc.total) + "</b></div>";
     var noteHtml = "";
     if(doc.motivo){
       noteHtml = "<div class=\"detail-note\">" + esc(doc.motivo) + "</div>";
-    } else if(doc.tipo === "52"){
-      noteHtml = "<div class=\"detail-note\">Guía de despacho: documento de traslado, no genera obligación de IVA por sí sola.</div>";
+    } else if(doc.folio_doc_ref){
+      noteHtml = "<div class=\"detail-note\">Hace referencia al documento tipo " +
+        esc(doc.tipo_doc_ref || "?") + ", folio " + esc(doc.folio_doc_ref) + ".</div>";
     }
     var itemsHtml = items.length
       ? "<table class=\"items-table\"><thead><tr><th>Descripción</th><th class=\"num\">Cant.</th><th class=\"num\">Precio unit.</th><th class=\"num\">Subtotal</th></tr></thead><tbody>" + rows + "</tbody></table>" + totalsHtml
-      : "<div class=\"detail-note\">Este documento no tiene detalle de ítems cargado todavía.</div>" + totalsHtml;
+      : "<div class=\"detail-note\">El SII no publica el detalle de ítems de los documentos recibidos: su Registro de Compras y Ventas solo entrega la cabecera que ves acá. El desglose por producto viaja en el XML que el emisor manda directamente al receptor.</div>" + totalsHtml;
     var xmlHtml = doc.xml_original
       ? "<details><summary class=\"link-btn xml-toggle\">Ver XML original</summary><div class=\"xml-box\">" + esc(doc.xml_original) + "</div></details>"
       : "";
@@ -575,7 +580,7 @@
 
       var mainRow = "<tr class=\"doc-row" + (isSelected ? " selected" : "") + "\" data-row=\"" + doc.id + "\">" +
         "<td>" + checkboxCell + "</td>" +
-        "<td><span class=\"doc-type\">" + (TIPO_LABEL[doc.tipo] || doc.tipo) + "</span><div class=\"mono muted small\">Folio " + doc.folio + "</div></td>" +
+        "<td><span class=\"doc-type\">" + esc(doc.tipo_nombre || doc.tipo) + "</span><div class=\"mono muted small\">Folio " + doc.folio + "</div></td>" +
         "<td><div class=\"provider-name\">" + esc(doc.proveedor_nombre) + "</div><div class=\"mono muted small\">" + esc(doc.proveedor_rut) + "</div></td>" +
         "<td class=\"muted\">" + fmtFecha(doc.fecha) + "</td>" +
         "<td class=\"num mono\">" + fmtCLP(doc.total) + "</td>" +
@@ -630,6 +635,7 @@
   }
 
   function renderAll(){
+    renderTipoFilter();
     renderKpis();
     renderTable();
     updateTabsUI();
@@ -737,7 +743,7 @@
     var doc = docs.find(function(d){ return d.id === id; });
     if(!doc) return;
     document.getElementById("modalMeta").innerHTML =
-      (TIPO_LABEL[doc.tipo] || doc.tipo) + " · Folio " + doc.folio + "<br>" + esc(doc.proveedor_nombre) + " · " + esc(doc.proveedor_rut);
+      esc(doc.tipo_nombre || doc.tipo) + " · Folio " + doc.folio + "<br>" + esc(doc.proveedor_nombre) + " · " + esc(doc.proveedor_rut);
     document.getElementById("modalError").textContent = doc.error_detalle || "Error no especificado.";
     document.getElementById("modalRetryBtn").setAttribute("data-id", id);
     document.getElementById("modalOverlay").hidden = false;

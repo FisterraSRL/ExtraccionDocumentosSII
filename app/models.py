@@ -17,14 +17,46 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
 
-class TipoDocumento(str, enum.Enum):
-    FACTURA_AFECTA = "33"
-    FACTURA_EXENTA = "34"
-    NOTA_CREDITO = "61"
-    NOTA_DEBITO = "56"
-    GUIA_DESPACHO = "52"
-    BOLETA = "39"
-    BHE = "BHE"
+# Catálogo de tipos de documento del SII, tal como lo devuelve el propio RCV
+# (servicio getDatosInicio, capturado el 16-sep-2026). Son 45 y el SII puede agregar
+# más, así que `tipo` se guarda como el código string y esto es solo para mostrar
+# el nombre: un código nuevo entra igual y se muestra como "Tipo N" en vez de
+# reventar la sincronización, que es lo que pasaría con un enum cerrado.
+TIPOS_DOCUMENTO: dict[str, str] = {
+    "29": "Factura de Inicio",
+    "30": "Factura",
+    "32": "Factura no Afecta o Exenta",
+    "33": "Factura Electrónica",
+    "34": "Factura no Afecta o Exenta Electrónica",
+    "35": "Total Oper. del mes Boleta Afecta",
+    "38": "Total Oper. del mes Boleta Exenta",
+    "39": "Total Oper. del mes Boleta Electrónica",
+    "40": "Liquidación Factura",
+    "41": "Total Op. del mes Boleta Exenta Electrónica",
+    "43": "Liquidación-Factura Electrónica",
+    "45": "Factura de Compra",
+    "46": "Factura de Compra Electrónica",
+    "48": "Total mes Comprobantes Pago Electrónico",
+    "55": "Nota de Débito",
+    "56": "Nota de Débito Electrónica",
+    "60": "Nota de Crédito",
+    "61": "Nota de Crédito Electrónica",
+    "101": "Factura de Exportación",
+    "102": "Factura vta. Exenta a Zona Franca Prim.",
+    "103": "Liquidación",
+    "104": "Nota de Débito de Exportación",
+    "106": "Nota de Crédito de Exportación",
+    "109": "Factura Turista",
+    "110": "Factura de Exportación Electrónica",
+    "111": "Nota de Débito de Exportación Electrónica",
+    "112": "Nota de Crédito de Exportación Electrónica",
+    "914": "Declaración de Ingreso (DIN)",
+    "BHE": "Boleta de Honorarios Electrónica",
+}
+
+
+def nombre_tipo(codigo: str) -> str:
+    return TIPOS_DOCUMENTO.get(codigo, f"Tipo {codigo}")
 
 
 class EstadoDocumento(str, enum.Enum):
@@ -54,9 +86,7 @@ class Documento(Base):
 
     # Identificación en el SII — folio + tipo + RUT emisor deben ser únicos entre sí,
     # es la clave natural para no duplicar un documento ya sincronizado.
-    tipo: Mapped[TipoDocumento] = mapped_column(
-        Enum(TipoDocumento, values_callable=_por_valor), nullable=False
-    )
+    tipo: Mapped[str] = mapped_column(String(4), nullable=False)  # código del SII, ver TIPOS_DOCUMENTO
     folio: Mapped[int] = mapped_column(Integer, nullable=False)
     proveedor_rut: Mapped[str] = mapped_column(String(12), nullable=False)
     proveedor_nombre: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -65,6 +95,7 @@ class Documento(Base):
     # Montos RCV (None para guía de despacho sin desglose de IVA)
     neto: Mapped[float | None] = mapped_column(Float, nullable=True)
     iva: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exento: Mapped[float | None] = mapped_column(Float, nullable=True)
     total: Mapped[float] = mapped_column(Float, nullable=False)
 
     # Campos específicos de BHE
@@ -73,6 +104,10 @@ class Documento(Base):
     retencion_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     retencion: Mapped[float | None] = mapped_column(Float, nullable=True)
     liquido: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Documento que corrige una nota de crédito/débito (lo entrega el RCV).
+    tipo_doc_ref: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    folio_doc_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Notas (motivo de NC/ND) e ítems (detalle del XML, lista de dicts: desc/cant/precio/subtotal)
     motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -95,6 +130,11 @@ class Documento(Base):
 
     sincronizado_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    @property
+    def tipo_nombre(self) -> str:
+        """Nombre legible del tipo; lo consume el portal para no duplicar el catálogo."""
+        return nombre_tipo(self.tipo)
+
 
 # ---------- Esquemas Pydantic (API) ----------
 
@@ -107,14 +147,18 @@ class ItemSchema(BaseModel):
 
 class DocumentoOut(BaseModel):
     id: int
-    tipo: TipoDocumento
+    tipo: str
+    tipo_nombre: str
     folio: int
     proveedor_rut: str
     proveedor_nombre: str
     fecha: date
     neto: float | None = None
     iva: float | None = None
+    exento: float | None = None
     total: float
+    tipo_doc_ref: str | None = None
+    folio_doc_ref: int | None = None
     servicio: str | None = None
     bruto: float | None = None
     retencion_pct: float | None = None
