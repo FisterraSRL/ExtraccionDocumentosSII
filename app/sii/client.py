@@ -1,30 +1,29 @@
 """Cliente de conexión al SII (Chile).
 
-Lo único que este módulo puede dar por confirmado hoy es la forma del certificado
-digital (.pfx) y cómo cargarlo — eso es criptografía estándar, no depende de que el
-SII no cambie nada. Todo lo que sigue (a qué URL exacta se autentica, qué servicio
-da el RCV, cómo se pide el XML de un documento puntual) son DOS caminos posibles,
-no uno confirmado, y hay que validarlo en vivo con el certificado real antes de
-construir el resto sobre un supuesto:
+ACTUALIZACIÓN (16-sep-2026) — leer antes de tocar este archivo: se confirmó que
+"Intercambio de información" NO está disponible para el certificado de producción
+que estamos usando, así que el Camino A (servicio web SOAP) queda descartado. El
+camino confirmado es automatizar un navegador real con el certificado instalado en
+el sistema operativo — ver `login_with_browser()` más abajo.
 
-  Camino A — Servicio web de "Intercambio de información" (SOAP, mutual TLS con el
-  certificado). Es el camino pensado para automatización: pedís el XML de un
-  documento puntual (RUT emisor + tipo + folio) sin simular un navegador. Requiere
-  que el certificado de la empresa esté habilitado para eso en el SII.
+También se confirmó algo importante sobre DÓNDE puede correr esto: el sandbox de
+Claude en la nube sale a internet a través de un proxy que intercepta y re-firma el
+tráfico HTTPS. Con un proxy así, la conexión TLS mutua queda entre el proxy y el
+SII, no entre el navegador/cliente y el SII — el certificado del cliente nunca le
+llega al SII. Se probó tanto con `requests` como con un Chromium real vía Playwright
+desde ese sandbox y ambos fallaron igual (mismo error genérico del SII). Este mismo
+código, corrido en un entorno SIN ese tipo de proxy (la compu de un desarrollador, o
+el servidor de producción final), debería funcionar — así fue como el usuario logró
+loguearse manualmente. Ver requisitos-portal-sii-finnegans.md, sección "Hallazgo
+clave", para el detalle completo de las pruebas.
 
-  Camino B — Automatización del portal web (login con certificado en
-  misiir.sii.cl / palena, navegar el RCV y el módulo de Boletas de Honorarios,
-  descargar el XML o el detalle desde ahí). Más frágil: pensado para un humano,
-  no para un cliente HTTP — cambios de layout, captchas, sesiones cortas.
-
-`test_connection()` es el primer paso real y sí es completamente funcional: valida
-que el .pfx cargue con la contraseña dada y que el SII acepte un handshake TLS
-mutuo con ese certificado contra su host de autenticación. Confirma que el
-certificado "sirve", no todavía qué API específica vamos a usar — eso se decide
-con el resultado de esa prueba y se documenta en requisitos-portal-sii-finnegans.md.
+Requisito de infraestructura que se desprende de esto: el hosting elegido para
+producción tiene que tener salida directa a internet, sin un proxy interceptor de
+por medio.
 """
 from __future__ import annotations
 
+import json
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -161,7 +160,50 @@ class SIIClient:
                 )
         return resultados
 
-    # ---------- Pendiente de validar con el resultado de test_connection() ----------
+    # ---------- Camino confirmado: navegador real con el certificado instalado ----------
+
+    def login_with_browser(self, nss_home: Path | str, headless: bool = True):
+        """Loguea al SII con un Chromium real (Playwright), usando el certificado
+        importado a una base de certificados NSS.
+
+        Mecánica confirmada y funcional (probada en el sandbox de Claude, ver docstring
+        del módulo para la limitación de red que impidió confirmar el resultado final
+        del login desde ahí — este método debe probarse en un entorno sin proxy
+        interceptor, por ejemplo la máquina de un desarrollador o el servidor final):
+
+        1. `nss_home` debe ser un directorio con `.pki/nssdb` conteniendo el certificado
+           ya importado (ver README del proyecto o `scripts/setup_nss_cert.sh` — pendiente
+           de crear ese script de conveniencia) y, si aplica, la CA de cualquier proxy
+           corporativo que el entorno real use.
+        2. Se lanza Chromium con `--auto-select-certificate-for-urls` apuntando a
+           `https://[*.]sii.cl`, para que no dependa de un diálogo humano de selección
+           de certificado.
+        3. Se navega a `https://misiir.sii.cl/cgi_misii/siihome.cgi` (el link real de
+           "Ingresar a Mi Sii") y se hace clic en "Ingresar con Certificado Digital".
+
+        Devuelve la instancia de `Page` de Playwright ya autenticada (o no — quien llama
+        debe verificar el resultado buscando el nombre/RUT del contribuyente en la
+        página, tal como se hizo en las pruebas), para poder seguir navegando el RCV/BHE
+        desde el mismo contexto de navegador.
+        """
+        from playwright.sync_api import sync_playwright  # import diferido: dependencia pesada
+
+        auto_select = json.dumps([{"pattern": "https://[*.]sii.cl", "filter": {}}])
+
+        playwright = sync_playwright().start()
+        browser = playwright.chromium.launch(
+            headless=headless,
+            args=[f"--auto-select-certificate-for-urls={auto_select}"],
+            env={"HOME": str(nss_home)},
+        )
+        context = browser.new_context()
+        page = context.new_page()
+        page.goto("https://misiir.sii.cl/cgi_misii/siihome.cgi", wait_until="networkidle", timeout=30000)
+        page.click("text=Ingresar con Certificado Digital", force=True, timeout=15000)
+        page.wait_for_load_state("networkidle", timeout=30000)
+        return page, context, browser, playwright
+
+    # ---------- Pendiente de validar con el resultado de login_with_browser() ----------
 
     def get_rcv(self, periodo: str) -> list[dict]:
         """Trae los documentos del RCV para un período (YYYY-MM). Pendiente: confirmar
