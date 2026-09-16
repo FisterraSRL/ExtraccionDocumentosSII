@@ -41,6 +41,7 @@ acepta el handshake con este certificado y responde 200).
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 import uuid
 from datetime import datetime
@@ -102,6 +103,8 @@ class SIIClient:
         self.cert_path = Path(cert_path)
         self._cert_password = cert_password
         self._conversation_id = uuid.uuid4().hex[:13].upper()
+        # Lo completa get_rcv() si logra leerlo; es dato de presentación, no crítico.
+        self.nombre_empresa: str | None = None
         self._cert_pem_file: Path | None = None
         self._key_pem_file: Path | None = None
 
@@ -296,6 +299,59 @@ class SIIClient:
 
     # ---------- Pendiente de validar con el resultado de login_with_browser() ----------
 
+    def get_empresas(self, session=None) -> list[str]:
+        """Lista los RUT de las empresas que este certificado puede consultar en el RCV.
+
+        Sale del propio selector del RCV, que es la fuente de verdad de lo que el SII
+        deja consultar hoy. El servicio `getDcvEmpresasAutorizadas` devuelve lo mismo
+        pero con `razonSocONombreEmp` en null para todas, así que **no hay nombres**:
+        el nombre se resuelve aparte (ver `get_nombre_empresa()` y el modelo Empresa).
+        """
+        propia = session is None
+        if propia:
+            session = self.login_with_browser(headless=True)
+        page, context, browser, playwright = session
+        try:
+            if not page.url.startswith(RCV_UI):
+                page.goto(RCV_UI + "#/index", wait_until="networkidle", timeout=60000)
+                page.wait_for_timeout(1500)
+            ruts = page.eval_on_selector_all(
+                "select[name=rut] option",
+                "els => els.map(e => e.value).filter(v => v && v.trim())",
+            )
+            return [r.strip() for r in ruts]
+        finally:
+            if propia:
+                context.close()
+                browser.close()
+                playwright.stop()
+
+    def get_nombre_empresa(self, page) -> str | None:
+        """Razón social de la empresa consultada, leída del detalle de un documento.
+
+        Es el único lugar del portal del SII donde aparece: el modal `verDTE` muestra
+        "Razón Social Receptor", y el receptor es justamente la empresa consultada. Hay
+        que estar en la pantalla de detalle de un tipo de documento, con al menos una
+        fila. Devuelve None si no se puede leer — es información para mostrar, nunca
+        motivo para fallar una sincronización.
+        """
+        try:
+            enlace = page.locator("[ng-click^='verDTE']")
+            if enlace.count() == 0:
+                return None
+            enlace.first.click()
+            page.wait_for_timeout(2500)
+            texto = page.inner_text("body")
+            m = re.search(r"Razón Social Receptor\s*:?\s*(.+)", texto)
+            nombre = m.group(1).strip() if m else None
+            cerrar = page.locator("button:has-text('Cerrar')")
+            if cerrar.count():
+                cerrar.first.click()
+                page.wait_for_timeout(500)
+            return nombre or None
+        except Exception:
+            return None
+
     @staticmethod
     def _partir_rut(rut: str) -> tuple[str, str]:
         """'10.439.188-5' → ('10439188', '5')."""
@@ -421,6 +477,11 @@ class SIIClient:
                     documentos.extend(
                         self._documento_desde_rcv(d, tipo) for d in (payload.get("data") or [])
                     )
+
+                # Aprovechar que estamos en el detalle para leer la razón social de la
+                # empresa, que no se puede obtener de ninguna otra pantalla.
+                if self.nombre_empresa is None and documentos:
+                    self.nombre_empresa = self.get_nombre_empresa(page)
 
             return documentos
         finally:

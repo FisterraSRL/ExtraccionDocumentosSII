@@ -16,6 +16,9 @@ from app.db import get_db
 from app.finnegans.client import FinnegansClient, FinnegansConfigError
 from app.models import (
     Documento,
+    Empresa,
+    EmpresaOut,
+    EmpresaUpdate,
     DocumentoOut,
     EnviarResult,
     EstadoDocumento,
@@ -29,12 +32,15 @@ router = APIRouter(prefix="/api", tags=["documentos"])
 
 @router.get("/documents", response_model=list[DocumentoOut])
 def listar_documentos(
+    empresa: str | None = None,
     estado: EstadoDocumento | None = None,
     tipo: str | None = None,
     q: str | None = None,
     db: Session = Depends(get_db),
 ):
     stmt = select(Documento)
+    if empresa:
+        stmt = stmt.where(Documento.empresa_rut == empresa)
     if estado:
         stmt = stmt.where(Documento.estado == estado)
     if tipo:
@@ -48,11 +54,98 @@ def listar_documentos(
     return db.execute(stmt.order_by(Documento.fecha.desc())).scalars().all()
 
 
+@router.get("/empresas", response_model=list[EmpresaOut])
+def listar_empresas(db: Session = Depends(get_db)):
+    """Empresas representadas, con cuántos documentos tiene cada una en la bandeja.
+
+    Se ordenan poniendo primero las que ya tienen nombre, para que las empresas con las
+    que se trabaja de verdad queden arriba y no perdidas entre 55 RUT sueltos.
+    """
+    conteos = dict(
+        db.execute(
+            select(Documento.empresa_rut, func.count()).group_by(Documento.empresa_rut)
+        ).all()
+    )
+    pendientes = dict(
+        db.execute(
+            select(Documento.empresa_rut, func.count())
+            .where(Documento.estado == EstadoDocumento.PENDIENTE)
+            .group_by(Documento.empresa_rut)
+        ).all()
+    )
+    salida = [
+        EmpresaOut(
+            rut=e.rut,
+            nombre=e.nombre,
+            nombre_mostrado=e.nombre_mostrado,
+            autorizada=e.autorizada,
+            ultima_sincronizacion=e.ultima_sincronizacion,
+            documentos=conteos.get(e.rut, 0),
+            pendientes=pendientes.get(e.rut, 0),
+        )
+        for e in db.execute(select(Empresa)).scalars().all()
+    ]
+    salida.sort(key=lambda e: (e.nombre is None, (e.nombre or e.rut).lower()))
+    return salida
+
+
+@router.patch("/empresas/{rut}", response_model=EmpresaOut)
+def nombrar_empresa(rut: str, datos: EmpresaUpdate, db: Session = Depends(get_db)):
+    """Pone el nombre con el que el usuario conoce a la empresa.
+
+    Hace falta porque el SII lista las empresas representadas solo por RUT: su campo de
+    razón social viene vacío para todas. Sin esto, elegir entre 55 RUT es impracticable.
+    """
+    empresa = db.get(Empresa, rut)
+    if not empresa:
+        raise HTTPException(status_code=404, detail=f"No hay una empresa con RUT {rut}.")
+    empresa.nombre = datos.nombre.strip() or None
+    db.commit()
+    # Se devuelve la fila tal como la arma el listado, para no tener dos formas de
+    # construir un EmpresaOut que puedan divergir (ya pasó: faltaba `pendientes`).
+    return next(e for e in listar_empresas(db) if e.rut == rut)
+
+
+@router.post("/empresas/refrescar", response_model=list[EmpresaOut])
+def refrescar_empresas(db: Session = Depends(get_db)):
+    """Trae del SII la lista de empresas que este certificado puede consultar.
+
+    Las que el SII ya no lista se marcan `autorizada=False` en vez de borrarse, para no
+    perder los documentos que se les sincronizaron antes. Los nombres puestos a mano se
+    conservan siempre.
+    """
+    try:
+        rut, cert_path, password = settings.require_sii_credentials()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    client = SIIClient(rut, cert_path, password)
+    try:
+        ruts = client.get_empresas()
+    except SIIAuthenticationError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"No se pudo iniciar sesión en el SII: {exc}"
+        ) from exc
+    finally:
+        client.close()
+
+    conocidas = {e.rut: e for e in db.execute(select(Empresa)).scalars().all()}
+    for r in ruts:
+        if r in conocidas:
+            conocidas[r].autorizada = True
+        else:
+            db.add(Empresa(rut=r, autorizada=True))
+    for r, empresa in conocidas.items():
+        empresa.autorizada = r in ruts
+    db.commit()
+    return listar_empresas(db)
+
+
 @router.post("/sync", response_model=SyncResult)
 def sincronizar(
+    empresa: str | None = None,
     periodo: str | None = None,
     meses: int = 3,
-    rut_empresa: str | None = None,
     db: Session = Depends(get_db),
 ):
     """Trae del SII los documentos de compra del RCV y los guarda.
@@ -74,19 +167,25 @@ def sincronizar(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     periodos = [periodo] if periodo else _ultimos_periodos(meses)
+    objetivos = _empresas_a_sincronizar(db, empresa, rut)
 
     nuevos = actualizados = 0
     client = SIIClient(rut, cert_path, password)
     try:
+        # Un solo login para todas las empresas y períodos: el SII limita la frecuencia
+        # de autenticaciones (ver AGENTS.md), así que la sesión se reusa a propósito.
         session = client.login_with_browser(headless=True)
         page, context, browser, playwright = session
         try:
-            for p in periodos:
-                for fila in client.get_rcv(p, rut_empresa=rut_empresa, session=session):
-                    if _guardar_documento(db, fila):
-                        nuevos += 1
-                    else:
-                        actualizados += 1
+            for rut_objetivo in objetivos:
+                client.nombre_empresa = None
+                for p in periodos:
+                    for fila in client.get_rcv(p, rut_empresa=rut_objetivo, session=session):
+                        if _guardar_documento(db, fila, rut_objetivo):
+                            nuevos += 1
+                        else:
+                            actualizados += 1
+                _registrar_empresa(db, rut_objetivo, client.nombre_empresa)
             db.commit()
         finally:
             context.close()
@@ -104,14 +203,63 @@ def sincronizar(
     finally:
         client.close()
 
-    total = db.scalar(select(func.count()).select_from(Documento)) or 0
+    filtro = select(func.count()).select_from(Documento)
+    if len(objetivos) == 1:
+        filtro = filtro.where(Documento.empresa_rut == objetivos[0])
+    total = db.scalar(filtro) or 0
+
     rango = periodos[0] if len(periodos) == 1 else f"{periodos[-1]} a {periodos[0]}"
+    quien = f"{len(objetivos)} empresas" if len(objetivos) > 1 else _nombre_de(db, objetivos[0])
     return SyncResult(
         documentos_nuevos=nuevos,
         documentos_totales=total,
-        mensaje=(f"Período {rango}: {nuevos} documentos nuevos, "
-                 f"{actualizados} ya conocidos. {total} en la bandeja."),
+        mensaje=(
+            f"{quien}, período {rango}: {nuevos} documentos nuevos, "
+            f"{actualizados} ya conocidos. {total} en la bandeja."
+        ),
     )
+
+
+def _empresas_a_sincronizar(db: Session, empresa: str | None, rut_certificado: str) -> list[str]:
+    """Resuelve qué empresas sincronizar: una, todas las autorizadas, o la del certificado."""
+    if empresa == "todas":
+        ruts = (
+            db.execute(
+                select(Empresa.rut).where(Empresa.autorizada.is_(True)).order_by(Empresa.rut)
+            )
+            .scalars()
+            .all()
+        )
+        if not ruts:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "No hay empresas registradas todavía. Usá POST /api/empresas/refrescar "
+                    "para traer del SII la lista de empresas representadas."
+                ),
+            )
+        return list(ruts)
+    return [empresa or rut_certificado.replace(".", "")]
+
+
+def _nombre_de(db: Session, rut: str) -> str:
+    empresa = db.get(Empresa, rut)
+    return empresa.nombre_mostrado if empresa else rut
+
+
+def _registrar_empresa(db: Session, rut: str, nombre: str | None) -> None:
+    """Deja constancia de la empresa sincronizada y de cuándo fue.
+
+    El nombre solo se escribe si todavía no había uno: un nombre puesto a mano por el
+    usuario manda sobre la razón social que se lea del SII.
+    """
+    empresa = db.get(Empresa, rut)
+    if not empresa:
+        empresa = Empresa(rut=rut, autorizada=True)
+        db.add(empresa)
+    if nombre and not empresa.nombre:
+        empresa.nombre = nombre
+    empresa.ultima_sincronizacion = datetime.now(timezone.utc)
 
 
 def _ultimos_periodos(cantidad: int) -> list[str]:
@@ -127,7 +275,7 @@ def _ultimos_periodos(cantidad: int) -> list[str]:
     return periodos
 
 
-def _guardar_documento(db: Session, fila: dict) -> bool:
+def _guardar_documento(db: Session, fila: dict, empresa_rut: str) -> bool:
     """Inserta o actualiza un documento del RCV. Devuelve True si era nuevo.
 
     Sobre un documento ya existente solo refresca los datos que vienen del SII; no toca
@@ -136,6 +284,7 @@ def _guardar_documento(db: Session, fila: dict) -> bool:
     """
     existente = db.execute(
         select(Documento).where(
+            Documento.empresa_rut == empresa_rut,
             Documento.tipo == fila["tipo"],
             Documento.folio == fila["folio"],
             Documento.proveedor_rut == fila["proveedor_rut"],
@@ -159,8 +308,8 @@ def _guardar_documento(db: Session, fila: dict) -> bool:
         return False
 
     db.add(Documento(
-        tipo=fila["tipo"], folio=fila["folio"], proveedor_rut=fila["proveedor_rut"],
-        estado=EstadoDocumento.PENDIENTE, **campos,
+        empresa_rut=empresa_rut, tipo=fila["tipo"], folio=fila["folio"],
+        proveedor_rut=fila["proveedor_rut"], estado=EstadoDocumento.PENDIENTE, **campos,
     ))
     return True
 

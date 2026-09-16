@@ -147,6 +147,32 @@ internet sin proxy interceptor" queda **sin fundamento confirmado** — se deriv
 hipótesis descartada. Habrá que reprobarlo en el entorno de destino, pero ya no es una
 restricción conocida a la hora de elegir hosting.
 
+## Empresas representadas
+
+El certificado de Alonso Álvarez representa a **55 contribuyentes**. El RCV los lista en
+su selector y en el servicio `getDcvEmpresasAutorizadas`, pero **solo por RUT**: el campo
+`razonSocONombreEmp` viene `null` para todos. No hay ninguna pantalla del portal que dé
+la lista con nombres.
+
+El único lugar donde aparece la razón social de una empresa representada es el modal
+`verDTE` de un documento suyo ("Razón Social Receptor"). Por eso el nombre se resuelve
+de dos formas, y ninguna es obligatoria para que el sistema funcione:
+
+- **Automática:** `get_rcv()` aprovecha que está en la pantalla de detalle y lee la razón
+  social del receptor (`SIIClient.get_nombre_empresa()`). Solo funciona si la empresa
+  tiene al menos un documento en el período.
+- **Manual:** el usuario le pone el nombre con el que la conoce desde el portal
+  (`PATCH /api/empresas/{rut}`). Un nombre puesto a mano **siempre** manda sobre el que
+  se lea del SII.
+
+`POST /api/empresas/refrescar` trae la lista desde el SII. Las empresas que el SII deja
+de listar se marcan `autorizada=False` en vez de borrarse, para no perder sus documentos.
+
+**Sin verificar todavía contra el SII** (quedó bloqueado por límite de frecuencia de
+logins mientras se desarrollaba esto, ver sección siguiente): `get_empresas()`,
+`get_nombre_empresa()` y la sincronización de varias empresas en una pasada
+(`POST /api/sync?empresa=todas`). El modelo, la API y el portal sí están verificados.
+
 ## ⚠️ El SII limita la frecuencia de logins
 
 Observado el 16-sep-2026, después de unas 15 autenticaciones en menos de una hora

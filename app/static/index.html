@@ -101,6 +101,14 @@
   }
 
   /* ---------- KPI ---------- */
+  .empresa-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 18px;
+    padding:14px 16px;background:var(--surface,#fff);border:1px solid rgba(10,47,67,.10);
+    border-radius:14px;}
+  .empresa-bar label{font-weight:700;color:#0A2F43;font-size:.82rem;letter-spacing:.04em;
+    text-transform:uppercase;}
+  .empresa-bar select{min-width:min(340px,100%);padding:8px 10px;border-radius:9px;
+    border:1px solid rgba(10,47,67,.22);font:inherit;color:#0A2F43;background:#fff;}
+  .empresa-meta{color:#5b6b75;font-size:.84rem;}
   .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
   .kpi{
     background:rgba(255,255,255,.55); border:var(--fs-hairline); border-radius:16px; padding:14px 16px;
@@ -256,6 +264,7 @@
   .empty-state{padding:36px 20px; text-align:center; color:var(--fs-steel-deep); font-size:.9rem; font-weight:500;}
 
   @media (max-width:640px){
+    .empresa-bar{flex-direction:column; align-items:stretch;}
     .kpis{grid-template-columns:repeat(2,1fr);}
     .header-row{flex-direction:column;}
     .sync-block{align-items:flex-start; width:100%;}
@@ -296,6 +305,14 @@
     </div>
   </div>
 
+      <div class="empresa-bar">
+        <label for="empresaSelect">Empresa</label>
+        <select id="empresaSelect" aria-label="Empresa a consultar">
+          <option value="">Cargando empresas…</option>
+        </select>
+        <button class="link-btn" id="renombrarBtn" type="button" title="El SII no entrega el nombre, solo el RUT">Ponerle nombre</button>
+        <span class="empresa-meta" id="empresaMeta"></span>
+      </div>
   <div class="kpis">
     <div class="kpi pending">
       <div class="kpi-label">Pendientes de envío</div>
@@ -405,6 +422,8 @@
   var selected = new Set();
   var expanded = new Set();
   var filters = { estado:"todos", tipo:"todos", q:"" };
+  var empresas = [];
+  var empresaActual = localStorage.getItem("empresaActual") || "";
   var bulkConfirming = false;
   var toastTimer = null;
   var loading = true;
@@ -428,10 +447,48 @@
     label.textContent = text;
   }
 
+  function loadEmpresas(){
+    return apiFetch("/api/empresas").then(function(r){
+      empresas = (r.ok && r.data) ? r.data : [];
+      // Si la empresa recordada ya no está, caer en la primera con documentos.
+      var existe = empresas.some(function(e){ return e.rut === empresaActual; });
+      if(!existe){
+        var conDocs = empresas.filter(function(e){ return e.documentos > 0; });
+        empresaActual = (conDocs[0] || empresas[0] || {}).rut || "";
+      }
+      renderEmpresas();
+    });
+  }
+
+  function renderEmpresas(){
+    var sel = document.getElementById("empresaSelect");
+    if(empresas.length === 0){
+      sel.innerHTML = "<option value=\"\">No hay empresas todavía — sincronizá para traerlas</option>";
+      document.getElementById("empresaMeta").textContent = "";
+      return;
+    }
+    sel.innerHTML = empresas.map(function(e){
+      var etiqueta = e.nombre_mostrado + (e.nombre ? " · " + e.rut : "");
+      if(e.documentos) etiqueta += "  (" + e.documentos + ")";
+      return "<option value=\"" + esc(e.rut) + "\"" + (e.rut === empresaActual ? " selected" : "") +
+        ">" + esc(etiqueta) + "</option>";
+    }).join("");
+    var actual = empresas.filter(function(e){ return e.rut === empresaActual; })[0];
+    var meta = document.getElementById("empresaMeta");
+    if(actual){
+      meta.textContent = actual.ultima_sincronizacion
+        ? "Última sincronización: " + fmtFecha(actual.ultima_sincronizacion)
+        : "Sin sincronizar todavía";
+    } else {
+      meta.textContent = "";
+    }
+  }
+
   function loadDocuments(){
     loading = true;
     renderAll();
-    return apiFetch("/api/documents").then(function(r){
+    var url = "/api/documents" + (empresaActual ? "?empresa=" + encodeURIComponent(empresaActual) : "");
+    return apiFetch(url).then(function(r){
       if(!r.ok){
         setConnStatus("error", "Backend respondió con error (" + r.status + ")");
         docs = [];
@@ -660,11 +717,12 @@
     icon.innerHTML = "<span class=\"spinner\"></span>";
     label.textContent = "Sincronizando con SII…";
 
-    apiFetch("/api/sync", { method: "POST" }).then(function(r){
+    apiFetch("/api/sync" + (empresaActual ? "?empresa=" + encodeURIComponent(empresaActual) : ""),
+             { method: "POST" }).then(function(r){
       if(r.ok){
         document.getElementById("syncMeta").textContent = "Última sincronización: hace instantes";
         showToast(r.data.mensaje || ("Sincronización completa: " + (r.data.documentos_nuevos || 0) + " nuevos"));
-        return loadDocuments();
+        return loadEmpresas().then(loadDocuments);
       } else {
         document.getElementById("syncMeta").textContent = "Última sincronización: falló (ver aviso)";
         showToast("No se pudo sincronizar: " + (r.data.detail || ("error " + r.status)), true);
@@ -686,7 +744,7 @@
     return apiFetch("/api/documents/" + id + "/send", { method: "POST" }).then(function(r){
       if(r.ok && r.data.estado === "enviado"){
         showToast("Documento enviado a Finnegans");
-        return loadDocuments();
+        return loadEmpresas().then(loadDocuments);
       } else if(r.ok){
         // el backend proceso el envio pero quedo en error (p.ej. Finnegans lo rechazo)
         return loadDocuments().then(function(){
@@ -815,6 +873,32 @@
   document.getElementById("searchInput").addEventListener("input", function(e){
     filters.q = e.target.value; renderTable();
   });
+  document.getElementById("empresaSelect").addEventListener("change", function(e){
+    empresaActual = e.target.value;
+    try { localStorage.setItem("empresaActual", empresaActual); } catch(err){}
+    selected.clear(); expanded.clear();
+    renderEmpresas();
+    loadDocuments();
+  });
+
+  document.getElementById("renombrarBtn").addEventListener("click", function(){
+    if(!empresaActual){ showToast("Elegí una empresa primero.", true); return; }
+    var actual = empresas.filter(function(e){ return e.rut === empresaActual; })[0] || {};
+    var nombre = window.prompt(
+      "¿Con qué nombre conocés a la empresa " + empresaActual + "?\n\n" +
+      "El SII solo entrega el RUT, así que este nombre lo ponés vos.", actual.nombre || "");
+    if(nombre === null) return;
+    apiFetch("/api/empresas/" + encodeURIComponent(empresaActual), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre: nombre })
+    }).then(function(r){
+      if(!r.ok){ showToast("No se pudo guardar el nombre.", true); return; }
+      showToast("Nombre guardado.");
+      loadEmpresas();
+    });
+  });
+
   document.getElementById("tipoFilter").addEventListener("change", function(e){
     filters.tipo = e.target.value; renderTable();
   });
@@ -840,7 +924,7 @@
   });
 
   renderAll();
-  loadDocuments();
+  loadEmpresas().then(loadDocuments);
 })();
 </script>
 

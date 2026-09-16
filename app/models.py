@@ -11,7 +11,18 @@ import enum
 from datetime import date, datetime
 
 from pydantic import BaseModel
-from sqlalchemy import JSON, Date, DateTime, Enum, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Enum,
+    Float,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -74,15 +85,49 @@ def _por_valor(enum_class) -> list[str]:
     return [m.value for m in enum_class]
 
 
+class Empresa(Base):
+    """Una empresa que el titular del certificado puede consultar en el SII.
+
+    El SII las lista en el RCV (servicio getDcvEmpresasAutorizadas) pero **solo por RUT**:
+    el campo de razón social viene vacío para todas. El nombre se completa de dos formas,
+    ninguna obligatoria para que el sistema funcione:
+
+    - Automática: al sincronizar, se lee la razón social del receptor desde el detalle de
+      un documento del período (es el único lugar del portal que la expone).
+    - Manual: el usuario le pone el nombre con el que la conoce desde el portal
+      (`PATCH /api/empresas/{rut}`), que es lo que hace que "Centraliza" sea buscable
+      aunque el SII nunca devuelva ese nombre.
+    """
+
+    __tablename__ = "empresas"
+
+    rut: Mapped[str] = mapped_column(String(12), primary_key=True)
+    nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # False cuando el SII deja de listarla: se conserva para no perder sus documentos.
+    autorizada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    ultima_sincronizacion: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    @property
+    def nombre_mostrado(self) -> str:
+        return self.nombre or self.rut
+
+
 class Documento(Base):
     """Un documento traído del SII (RCV o BHE), con su detalle completo y su estado de envío."""
 
     __tablename__ = "documentos"
     __table_args__ = (
-        UniqueConstraint("tipo", "folio", "proveedor_rut", name="uq_documento_sii"),
+        # La empresa entra en la clave: dos empresas distintas pueden recibir documentos
+        # con el mismo tipo y folio del mismo proveedor, y no son el mismo documento.
+        UniqueConstraint(
+            "empresa_rut", "tipo", "folio", "proveedor_rut", name="uq_documento_sii"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Empresa receptora: de cuál de las empresas representadas es este documento.
+    empresa_rut: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
 
     # Identificación en el SII — folio + tipo + RUT emisor deben ser únicos entre sí,
     # es la clave natural para no duplicar un documento ya sincronizado.
@@ -145,8 +190,28 @@ class ItemSchema(BaseModel):
     subtotal: float
 
 
+class EmpresaOut(BaseModel):
+    rut: str
+    nombre: str | None = None
+    nombre_mostrado: str
+    autorizada: bool
+    ultima_sincronizacion: datetime | None = None
+    documentos: int = 0
+    pendientes: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class EmpresaUpdate(BaseModel):
+    """Nombre con el que el usuario conoce a la empresa (el SII no lo entrega)."""
+
+    nombre: str
+
+
 class DocumentoOut(BaseModel):
     id: int
+    empresa_rut: str
     tipo: str
     tipo_nombre: str
     folio: int
