@@ -42,6 +42,8 @@ from __future__ import annotations
 
 import json
 import tempfile
+import uuid
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,10 +63,21 @@ from cryptography.hazmat.primitives.serialization import (
 SII_CERT_AUTH_ORIGIN = "https://herculesr.sii.cl"
 SII_MISII_HOME = "https://misiir.sii.cl/cgi_misii/siihome.cgi"
 
+# Registro de Compras y Ventas. La UI es una SPA Angular que habla con estos servicios
+# JSON; llamarlos directo (con las cookies de la sesión del navegador) es mucho más
+# estable que scrapear el DOM. Mapeado capturando el tráfico real de la UI el 16-sep-2026.
+RCV_UI = "https://www4.sii.cl/consdcvinternetui/"
+RCV_SERVICE = RCV_UI + "services/data/facadeService"
+RCV_NAMESPACE = "cl.sii.sdi.lob.diii.consdcv.data.api.interfaces.FacadeService"
+
 SII_AUTH_HOSTS = [
     "https://zeusr.sii.cl",   # portal de autenticación (login humano, certificado o clave)
     "https://palena.sii.cl",  # servicios web de DTE en producción (histórico, a confirmar vigencia)
 ]
+
+
+class SIIRCVError(RuntimeError):
+    """Un servicio del Registro de Compras y Ventas respondió con error."""
 
 
 class SIIAuthenticationError(RuntimeError):
@@ -88,6 +101,7 @@ class SIIClient:
         self.rut = rut
         self.cert_path = Path(cert_path)
         self._cert_password = cert_password
+        self._conversation_id = uuid.uuid4().hex[:13].upper()
         self._cert_pem_file: Path | None = None
         self._key_pem_file: Path | None = None
 
@@ -267,13 +281,139 @@ class SIIClient:
 
     # ---------- Pendiente de validar con el resultado de login_with_browser() ----------
 
-    def get_rcv(self, periodo: str) -> list[dict]:
-        """Trae los documentos del RCV para un período (YYYY-MM). Pendiente: confirmar
-        endpoint/servicio real (Camino A o B) antes de implementar."""
-        raise NotImplementedError(
-            "Pendiente de definir tras test_connection(): servicio web de Intercambio "
-            "vs. automatización del portal RCV. Ver docstring del módulo."
-        )
+    @staticmethod
+    def _partir_rut(rut: str) -> tuple[str, str]:
+        """'10.439.188-5' → ('10439188', '5')."""
+        limpio = rut.replace(".", "").replace(" ", "").upper()
+        cuerpo, _, dv = limpio.partition("-")
+        if not cuerpo or not dv:
+            raise ValueError(f"RUT con formato inesperado: {rut!r} (se esperaba 12345678-9)")
+        return cuerpo, dv
+
+    @staticmethod
+    def _documento_desde_rcv(fila: dict, tipo: int) -> dict:
+        """Normaliza una fila de getDetalleCompra a la forma que usa el modelo Documento."""
+        fecha = fila.get("detFchDoc")  # el SII la manda como DD/MM/AAAA
+        return {
+            "tipo": str(tipo),
+            "folio": fila.get("detNroDoc"),
+            "proveedor_rut": f"{fila.get('detRutDoc')}-{fila.get('detDvDoc')}",
+            "proveedor_nombre": (fila.get("detRznSoc") or "").strip(),
+            "fecha": datetime.strptime(fecha, "%d/%m/%Y").date() if fecha else None,
+            "neto": fila.get("detMntNeto"),
+            "iva": fila.get("detMntIVA"),
+            "exento": fila.get("detMntExe"),
+            "total": fila.get("detMntTotal"),
+            # Referencia al documento que corrige, en notas de crédito/débito.
+            "tipo_doc_ref": fila.get("detTipoDocRef") or None,
+            "folio_doc_ref": fila.get("detFolioDocRef"),
+            "fecha_recepcion_sii": fila.get("detFecRecepcion"),
+        }
+
+    @staticmethod
+    def _rcv_consultar(page, rut_objetivo: str, mes: str, anho: str) -> dict:
+        """Completa el formulario del RCV y devuelve el JSON de getResumen."""
+        page.goto(RCV_UI + "#/index", wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(1500)
+        with page.expect_response(lambda r: "getResumen" in r.url, timeout=60000) as esperado:
+            page.select_option("select[name=rut]", rut_objetivo)
+            page.select_option("#periodoMes", mes)
+            page.select_option("select[ng-model=periodoAnho]", anho)
+            page.click("button[type=submit]")
+        resumen = esperado.value.json()
+        estado = resumen.get("respEstado") or {}
+        if estado.get("codRespuesta") not in (0, None):
+            raise SIIRCVError(
+                f"El RCV rechazó la consulta de {anho}-{mes} para {rut_objetivo}: "
+                f"código {estado.get('codRespuesta')}, {estado.get('msgeRespuesta')}"
+            )
+        page.wait_for_load_state("networkidle", timeout=60000)
+        return resumen
+
+    def get_rcv(self, periodo: str, rut_empresa: str | None = None, session=None) -> list[dict]:
+        """Trae los documentos de COMPRA del Registro de Compras y Ventas para un período.
+
+        `periodo` va como "AAAA-MM". `rut_empresa` permite consultar una de las empresas
+        que el certificado representa; por defecto usa el RUT del titular (`SII_RUT`).
+
+        **Cómo funciona y por qué así.** El RCV es una SPA Angular que habla con servicios
+        JSON (`getResumen` para los totales por tipo de documento, `getDetalleCompra` para
+        las cabeceras de cada documento). Lo ideal sería llamar esos servicios directo,
+        pero **no funciona**: reproduciéndolos con las mismas cookies, el mismo cuerpo y
+        los mismos headers, el backend responde `codRespuesta: 99, "El token no es
+        valido"`. Se probó llamándolos desde el contexto HTTP de Playwright y con un
+        `fetch` dentro de la propia página; ambos fallan igual, mientras que las llamadas
+        que dispara la SPA funcionan. El backend ata los datos al ciclo de vida de la
+        aplicación de alguna forma que no quedó identificada. **No re-intentar la vía
+        API-pura sin un hallazgo nuevo.**
+
+        Así que se maneja la UI (seleccionar empresa y período, apretar "Consultar") pero
+        se leen las **respuestas JSON** que esa interacción dispara, no el DOM. Es estable
+        frente a cambios de maquetado y entrega los datos ya tipados.
+
+        Devuelve cabeceras, no el detalle de ítems: eso vive en el XML del DTE, que el RCV
+        no expone. Ver `get_dte_xml()`.
+        """
+        ptributario = periodo.replace("-", "")
+        if len(ptributario) != 6 or not ptributario.isdigit():
+            raise ValueError(f"Período inválido: {periodo!r}. Se espera 'AAAA-MM' (ej: '2026-08').")
+        anho, mes = ptributario[:4], ptributario[4:]
+        rut_objetivo = (rut_empresa or self.rut).replace(".", "").upper()
+
+        propia = session is None
+        if propia:
+            session = self.login_with_browser(headless=True)
+        page, context, browser, playwright = session
+
+        detalles: list[dict] = []
+
+        def al_responder(resp):
+            if "getDetalleCompra" in resp.url:
+                try:
+                    detalles.append(resp.json())
+                except Exception:
+                    pass
+
+        page.on("response", al_responder)
+        try:
+            resumen = self._rcv_consultar(page, rut_objetivo, mes, anho)
+            tipos = [
+                (f.get("rsmnTipoDocInteger"), f.get("dcvNombreTipoDoc"), f.get("rsmnTotDoc"))
+                for f in (resumen.get("data") or [])
+                if f.get("rsmnTipoDocInteger") is not None
+            ]
+
+            documentos: list[dict] = []
+            for indice, (tipo, nombre, total) in enumerate(tipos):
+                # Una consulta fresca por tipo: al volver del detalle la SPA descarta los
+                # resultados, así que reusar la misma pantalla no es confiable.
+                if indice > 0:
+                    self._rcv_consultar(page, rut_objetivo, mes, anho)
+
+                enlace = page.locator(f"a[href='#detalle/{tipo}']")
+                if enlace.count() == 0:
+                    raise SIIRCVError(
+                        f"El período {periodo} tiene {total} documentos de tipo {tipo} "
+                        f"({nombre}) pero el RCV no ofrece enlace al detalle — "
+                        "probablemente supera su límite de documentos por consulta."
+                    )
+                detalles.clear()
+                with page.expect_response(lambda r: "getDetalleCompra" in r.url, timeout=60000):
+                    enlace.first.click()
+                page.wait_for_load_state("networkidle", timeout=60000)
+
+                for payload in detalles:
+                    documentos.extend(
+                        self._documento_desde_rcv(d, tipo) for d in (payload.get("data") or [])
+                    )
+
+            return documentos
+        finally:
+            page.remove_listener("response", al_responder)
+            if propia:
+                context.close()
+                browser.close()
+                playwright.stop()
 
     def get_bhe(self, periodo: str) -> list[dict]:
         """Trae las boletas de honorarios electrónicas recibidas en un período (YYYY-MM).
