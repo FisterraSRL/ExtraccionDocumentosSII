@@ -6,6 +6,7 @@ lote, seleccionado por el usuario — el envío nunca es automático, ver requis
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,6 +32,8 @@ from app.sii.client import (
     SIIRCVError,
 )
 from app.config import settings
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["documentos"])
 
@@ -287,6 +290,11 @@ def _completar_items(db: Session, client, session, rut_empresa: str, periodos: l
     tumbar la sincronización, que ya trajo las cabeceras — se deja el documento sin
     ítems y se sigue.
     """
+    # La sesión es autoflush=False, así que los documentos recién agregados por la
+    # sincronización todavía no son visibles para un SELECT. Sin este flush solo se
+    # enriquecen los que ya estaban en la base de una corrida anterior, que es
+    # exactamente el síntoma que apareció: una empresa nueva quedaba sin ningún ítem.
+    db.flush()
     pendientes = db.execute(
         select(Documento).where(
             Documento.empresa_rut == rut_empresa,
@@ -311,10 +319,14 @@ def _completar_items(db: Session, client, session, rut_empresa: str, periodos: l
         recibidos = client.listar_recibidos_portal(
             rut_empresa, desde=desde, hasta=hasta, session=session
         )
-    except SIIPortalFEError:
+    except SIIPortalFEError as exc:
         # La empresa no está en el Portal de Facturación: no hay PDF que leer.
+        log.info("Sin detalle de ítems para %s: %s", rut_empresa, exc)
         return
     except Exception:
+        # Best-effort: la sincronización ya trajo las cabeceras y no debe caerse por
+        # esto, pero el motivo tiene que quedar en el log y no desaparecer.
+        log.exception("Falló el listado del Portal FE para %s", rut_empresa)
         return
 
     indice = {(_norm_rut(r["rut_emisor"]), str(r["folio"]).strip()): r for r in recibidos}
@@ -326,6 +338,10 @@ def _completar_items(db: Session, client, session, rut_empresa: str, periodos: l
         try:
             detalle = client.get_items_documento(fila["codigo"], session)
         except Exception:
+            log.warning(
+                "No se pudo leer el PDF del documento %s (folio %s de %s)",
+                fila["codigo"], documento.folio, documento.proveedor_rut, exc_info=True,
+            )
             continue
         if not detalle.items:
             continue
