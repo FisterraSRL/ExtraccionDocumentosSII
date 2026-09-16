@@ -27,6 +27,7 @@ from app.models import (
 )
 from app.sii.client import (
     SIIAuthenticationError,
+    SIIBloqueadoError,
     SIIClient,
     SIIPortalFEError,
     SIIRCVError,
@@ -129,7 +130,7 @@ def refrescar_empresas(db: Session = Depends(get_db)):
 
     client = SIIClient(rut, cert_path, password)
     try:
-        session = client.login_with_browser(headless=True)
+        session = client.abrir_sesion(headless=True)
         try:
             ruts = client.get_empresas(session=session)
             nombradas = client.get_empresas_con_nombre(session=session)
@@ -137,6 +138,8 @@ def refrescar_empresas(db: Session = Depends(get_db)):
             session[1].close()
             session[2].close()
             session[3].stop()
+    except SIIBloqueadoError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except SIIAuthenticationError as exc:
         raise HTTPException(
             status_code=502, detail=f"No se pudo iniciar sesión en el SII: {exc}"
@@ -202,7 +205,7 @@ def sincronizar(
     try:
         # Un solo login para todas las empresas y períodos: el SII limita la frecuencia
         # de autenticaciones (ver AGENTS.md), así que la sesión se reusa a propósito.
-        session = client.login_with_browser(headless=True)
+        session = client.abrir_sesion(headless=True)
         page, context, browser, playwright = session
         try:
             for rut_objetivo in objetivos:
@@ -221,6 +224,9 @@ def sincronizar(
             context.close()
             browser.close()
             playwright.stop()
+    except SIIBloqueadoError as exc:
+        db.rollback()
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except SIIAuthenticationError as exc:
         db.rollback()
         raise HTTPException(status_code=502, detail=f"No se pudo iniciar sesión en el SII: {exc}") from exc

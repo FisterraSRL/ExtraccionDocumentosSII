@@ -238,12 +238,30 @@ No está confirmado con el SII, pero la explicación que encaja es una limitaci�
 frecuencia. `login_with_browser()` detecta ese redirect y lo reporta con un mensaje
 específico en vez del error genérico.
 
-**Consecuencias de diseño, a tener en cuenta:**
+**Qué se hace al respecto** (implementado el 16-sep-2026). La estrategia no es evadir
+el límite sino **necesitar muy pocos logins**:
 
-- Reusar una sesión abierta para varias consultas. `get_rcv()` ya acepta `session=`
-  justamente para eso, y `POST /api/sync` hace un solo login para todos los períodos.
-- No poner reintentos automáticos de login: empeoran el bloqueo.
-- Si aparece durante el desarrollo, esperar un rato antes de volver a probar.
+- `SIIClient.abrir_sesion()` es la puerta de entrada al SII para todo el código.
+  Guarda las cookies en `secrets/sii_sesion.json` y, en el siguiente uso, abre el
+  navegador con ellas y comprueba con **una** petición si la sesión sigue viva. Si
+  sirve, no se autentica. Medido: reusar tarda ~8 s contra ~40 s de un login completo,
+  y una sincronización entera puede correr sin autenticarse ni una vez.
+- **No** usar `login_with_browser()` directo desde código nuevo: es la primitiva que
+  fuerza una autenticación. Usar siempre `abrir_sesion()`.
+- Auto-freno en `_revisar_si_puedo_loguear()`: no se piden dos logins con menos de
+  `MIN_SEGUNDOS_ENTRE_LOGINS` (120 s) de diferencia, y si el SII bloqueó se espera
+  `ESPERA_TRAS_BLOQUEO_SEGUNDOS` (30 min) antes de volver a intentar. Los tiempos son
+  conservadores por elección: no conocemos el umbral real del SII. Cuando el freno
+  actúa, la API responde **429**, no 502 — no es un fallo del SII, somos nosotros.
+- Nunca reintentar un login en automático: alarga el bloqueo.
+- `secrets/sii_sesion.json` son cookies de sesión: dan acceso a la cuenta mientras
+  estén vivas. Está bajo `secrets/`, ya ignorado por git, y hay que tratarlo con el
+  mismo cuidado que el certificado.
+
+**Lo que no sabemos y convendría averiguar:** el umbral exacto del SII (cuántas
+autenticaciones en cuánto tiempo) y si hay un canal oficial para automatizar. El portal
+no está pensado para esto; los servicios web de "Intercambio de información" sí, y
+habilitarlos para este certificado es un trámite con el SII que vale la pena evaluar.
 
 ## Certificado y credenciales — SEGURIDAD
 

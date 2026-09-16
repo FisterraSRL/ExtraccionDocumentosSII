@@ -43,6 +43,7 @@ from __future__ import annotations
 import json
 import re
 import tempfile
+import time
 import uuid
 from datetime import datetime
 from dataclasses import dataclass
@@ -83,10 +84,28 @@ PORTAL_FE_RECIBIDOS = (
 )
 PORTAL_FE_PDF = "https://www1.sii.cl/cgi-bin/Portal001/mipeShowPdf.cgi?CODIGO={codigo}"
 
+# Estado de la sesión, en la misma carpeta que el certificado porque son secretos del
+# mismo orden: las cookies de sesión dan acceso a la cuenta mientras estén vivas.
+# `secrets/` ya está en .gitignore.
+DIR_ESTADO = Path("secrets")
+ARCHIVO_COOKIES = DIR_ESTADO / "sii_sesion.json"
+ARCHIVO_ESTADO = DIR_ESTADO / "sii_estado.json"
+
+# El SII limita la cantidad de autenticaciones (ver AGENTS.md). No sabemos el umbral
+# exacto, así que el diseño no intenta adivinarlo: lo que hace es necesitar muy pocos
+# logins (reusando la sesión) y frenarse solo si igual se acerca a un ritmo alto.
+MIN_SEGUNDOS_ENTRE_LOGINS = 120
+# Cuando el SII ya nos bloqueó, insistir empeora las cosas: se espera antes de reintentar.
+ESPERA_TRAS_BLOQUEO_SEGUNDOS = 30 * 60
+
 SII_AUTH_HOSTS = [
     "https://zeusr.sii.cl",   # portal de autenticación (login humano, certificado o clave)
     "https://palena.sii.cl",  # servicios web de DTE en producción (histórico, a confirmar vigencia)
 ]
+
+
+class SIIBloqueadoError(RuntimeError):
+    """No se intenta autenticar: el SII bloqueó hace poco, o sería demasiado seguido."""
 
 
 class SIIPortalFEError(RuntimeError):
@@ -221,6 +240,117 @@ class SIIClient:
 
     # ---------- Camino confirmado: navegador real con el certificado instalado ----------
 
+    # ---------- Reuso de sesión: la defensa contra el bloqueo del SII ----------
+
+    @staticmethod
+    def _leer_estado() -> dict:
+        try:
+            return json.loads(ARCHIVO_ESTADO.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _escribir_estado(estado: dict) -> None:
+        try:
+            DIR_ESTADO.mkdir(parents=True, exist_ok=True)
+            ARCHIVO_ESTADO.write_text(json.dumps(estado), encoding="utf-8")
+        except Exception:
+            # Que no se pueda guardar el estado no debe impedir trabajar; solo se pierde
+            # la protección contra logins seguidos.
+            pass
+
+    def _revisar_si_puedo_loguear(self) -> None:
+        """Frena antes de pedirle al SII una autenticación que probablemente rechace."""
+        estado = self._leer_estado()
+        ahora = time.time()
+
+        bloqueo = estado.get("ultimo_bloqueo", 0)
+        restante = ESPERA_TRAS_BLOQUEO_SEGUNDOS - (ahora - bloqueo)
+        if bloqueo and restante > 0:
+            raise SIIBloqueadoError(
+                f"El SII bloqueó la autenticación hace {int((ahora - bloqueo) / 60)} minutos. "
+                f"No se reintenta hasta dentro de {int(restante / 60)} minutos: insistir "
+                "alarga el bloqueo. Los documentos ya sincronizados se siguen viendo."
+            )
+
+        ultimo = estado.get("ultimo_login", 0)
+        espera = MIN_SEGUNDOS_ENTRE_LOGINS - (ahora - ultimo)
+        if ultimo and espera > 0:
+            raise SIIBloqueadoError(
+                f"Hubo un login al SII hace {int(ahora - ultimo)} segundos. Se esperan "
+                f"{int(espera)} segundos más antes de pedir otro, para no gatillar el "
+                "límite de frecuencia del SII."
+            )
+
+    def _sesion_viva(self, page) -> bool:
+        """¿Las cookies guardadas siguen sirviendo? Una sola petición, sin autenticar."""
+        try:
+            page.goto(SII_MISII_HOME, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(800)
+            texto = page.inner_text("body")
+        except Exception:
+            return False
+        rut_plano = self.rut.replace(".", "").replace("-", "")
+        return "Cerrar Sesión" in texto or rut_plano[:8] in texto.replace(".", "").replace("-", "")
+
+    def abrir_sesion(self, headless: bool = True, forzar_login: bool = False):
+        """Devuelve una sesión autenticada, **reusando** la anterior si sigue viva.
+
+        Esta es la forma de entrar al SII que debe usar el resto del código, no
+        `login_with_browser()` directo. El SII limita la cantidad de autenticaciones y
+        bloquea por un rato cuando se pasa (ver AGENTS.md), así que cada login que se
+        evita es la mejor protección disponible:
+
+        1. Si hay cookies guardadas de una sesión anterior, se abre el navegador con
+           ellas y se comprueba con **una** petición si siguen sirviendo. Si sirven, se
+           devuelve la sesión sin autenticar.
+        2. Recién si no sirven se hace el login con certificado, y las cookies nuevas
+           quedan guardadas para la próxima.
+
+        Devuelve la misma tupla que `login_with_browser()`.
+        """
+        from playwright.sync_api import sync_playwright  # import diferido: dependencia pesada
+
+        if not forzar_login and ARCHIVO_COOKIES.is_file():
+            playwright = sync_playwright().start()
+            browser = playwright.chromium.launch(headless=headless)
+            try:
+                context = browser.new_context(storage_state=str(ARCHIVO_COOKIES))
+                page = context.new_page()
+                page.on("dialog", lambda dialogo: dialogo.accept())
+                if self._sesion_viva(page):
+                    return page, context, browser, playwright
+                context.close()
+            except Exception:
+                pass
+            browser.close()
+            playwright.stop()
+
+        self._revisar_si_puedo_loguear()
+        try:
+            session = self.login_with_browser(headless=headless)
+        except SIIAuthenticationError as exc:
+            if "servicios_online/1943" in str(exc):
+                estado = self._leer_estado()
+                estado["ultimo_bloqueo"] = time.time()
+                self._escribir_estado(estado)
+            raise
+
+        estado = self._leer_estado()
+        estado["ultimo_login"] = time.time()
+        estado.pop("ultimo_bloqueo", None)
+        self._escribir_estado(estado)
+        self._guardar_cookies(session[1])
+        return session
+
+    @staticmethod
+    def _guardar_cookies(context) -> None:
+        try:
+            DIR_ESTADO.mkdir(parents=True, exist_ok=True)
+            context.storage_state(path=str(ARCHIVO_COOKIES))
+        except Exception:
+            pass
+
     def login_with_browser(self, headless: bool = True, timeout: float = 45000):
         """Loguea al SII con un Chromium real (Playwright) usando el certificado digital.
 
@@ -329,7 +459,7 @@ class SIIClient:
         """
         propia = session is None
         if propia:
-            session = self.login_with_browser(headless=True)
+            session = self.abrir_sesion(headless=True)
         page, context, browser, playwright = session
         try:
             page.goto(PORTAL_FE_EMPRESAS, wait_until="domcontentloaded", timeout=45000)
@@ -393,7 +523,7 @@ class SIIClient:
         """
         propia = session is None
         if propia:
-            session = self.login_with_browser(headless=True)
+            session = self.abrir_sesion(headless=True)
         page, context, browser, playwright = session
         try:
             self._entrar_portal_fe(page, rut_empresa)
@@ -484,7 +614,7 @@ class SIIClient:
         """
         propia = session is None
         if propia:
-            session = self.login_with_browser(headless=True)
+            session = self.abrir_sesion(headless=True)
         page, context, browser, playwright = session
         try:
             if not page.url.startswith(RCV_UI):
@@ -608,7 +738,7 @@ class SIIClient:
 
         propia = session is None
         if propia:
-            session = self.login_with_browser(headless=True)
+            session = self.abrir_sesion(headless=True)
         page, context, browser, playwright = session
 
         detalles: list[dict] = []
