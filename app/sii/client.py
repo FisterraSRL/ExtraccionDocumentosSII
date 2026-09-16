@@ -1,25 +1,42 @@
 """Cliente de conexión al SII (Chile).
 
-ACTUALIZACIÓN (16-sep-2026) — leer antes de tocar este archivo: se confirmó que
-"Intercambio de información" NO está disponible para el certificado de producción
-que estamos usando, así que el Camino A (servicio web SOAP) queda descartado. El
-camino confirmado es automatizar un navegador real con el certificado instalado en
-el sistema operativo — ver `login_with_browser()` más abajo.
+ACTUALIZACIÓN (16-sep-2026) — el login automatizado FUNCIONA, confirmado end-to-end
+contra el SII real. Corrige dos conclusiones anteriores de este archivo:
 
-También se confirmó algo importante sobre DÓNDE puede correr esto: el sandbox de
-Claude en la nube sale a internet a través de un proxy que intercepta y re-firma el
-tráfico HTTPS. Con un proxy así, la conexión TLS mutua queda entre el proxy y el
-SII, no entre el navegador/cliente y el SII — el certificado del cliente nunca le
-llega al SII. Se probó tanto con `requests` como con un Chromium real vía Playwright
-desde ese sandbox y ambos fallaron igual (mismo error genérico del SII). Este mismo
-código, corrido en un entorno SIN ese tipo de proxy (la compu de un desarrollador, o
-el servidor de producción final), debería funcionar — así fue como el usuario logró
-loguearse manualmente. Ver requisitos-portal-sii-finnegans.md, sección "Hallazgo
-clave", para el detalle completo de las pruebas.
+1. "Intercambio de información" (servicio web SOAP) sigue descartado para este
+   certificado. El camino es automatizar un navegador — eso no cambió.
 
-Requisito de infraestructura que se desprende de esto: el hosting elegido para
-producción tiene que tener salida directa a internet, sin un proxy interceptor de
-por medio.
+2. **El proxy interceptor NO era la causa del fallo de login.** Esa hipótesis quedó
+   descartada. Las causas reales eran dos, ambas del lado del cliente:
+
+   a. La página `IngresoCertificado.html` del SII muestra un `confirm()` de
+      JavaScript antes de enviar el formulario de autenticación. Su rama `else` es
+      `location.replace('http://www.sii.cl')`. Playwright **descarta los diálogos
+      automáticamente**, así que el `confirm()` devolvía `false` y el navegador se
+      iba solo a la home pública del SII. Ese era el "redirect a www.sii.cl" que se
+      venía interpretando como rechazo del certificado. Hay que registrar un handler
+      `page.on("dialog", ...)` que lo acepte.
+
+   b. El certificado hay que presentarlo con la opción `client_certificates` de
+      Playwright, no con `--auto-select-certificate-for-urls`: ese no es un switch de
+      línea de comandos de Chromium (es una política de empresa, se configura por
+      registro en Windows), así que Chromium lo ignoraba en silencio.
+
+   Además, el `.pfx` de E-CERTCHILE usa un algoritmo que OpenSSL 3 rechaza por
+   obsoleto, así que `pfxPath` falla con "Unsupported TLS certificate". Por eso se le
+   pasan los PEM que ya produce `_load_pkcs12()` (`certPath`/`keyPath`).
+
+Consecuencias prácticas, importantes para decidir el hosting:
+
+- Ya no hace falta que el certificado esté en el almacén del sistema operativo: el
+  `.pfx` se lee del disco. Esto vuelve el login **portable** (Linux, contenedor, cloud)
+  y elimina el parámetro `nss_home` que tenía este método.
+- El requisito de "salida a internet sin proxy interceptor" queda **sin confirmar**:
+  se estableció a partir de la hipótesis que acabamos de descartar. Habrá que
+  reprobarlo en el entorno de destino, pero ya no es una restricción conocida.
+
+El endpoint que hace la autenticación TLS mutua es `herculesr.sii.cl` (confirmado:
+acepta el handshake con este certificado y responde 200).
 """
 from __future__ import annotations
 
@@ -39,10 +56,19 @@ from cryptography.hazmat.primitives.serialization import (
 # Hosts públicos conocidos del SII para autenticación con certificado digital.
 # No confirmado todavía cuál responde mejor a un cliente no-browser — test_connection
 # los prueba a ambos y reporta qué pasó con cada uno.
+# Origen que hace la autenticación TLS mutua — al que hay que presentarle el
+# certificado. Confirmado probando el handshake directo con requests.
+SII_CERT_AUTH_ORIGIN = "https://herculesr.sii.cl"
+SII_MISII_HOME = "https://misiir.sii.cl/cgi_misii/siihome.cgi"
+
 SII_AUTH_HOSTS = [
     "https://zeusr.sii.cl",   # portal de autenticación (login humano, certificado o clave)
     "https://palena.sii.cl",  # servicios web de DTE en producción (histórico, a confirmar vigencia)
 ]
+
+
+class SIIAuthenticationError(RuntimeError):
+    """El navegador terminó el flujo de login pero la sesión no quedó iniciada."""
 
 
 class SIICertificateError(RuntimeError):
@@ -162,60 +188,81 @@ class SIIClient:
 
     # ---------- Camino confirmado: navegador real con el certificado instalado ----------
 
-    def login_with_browser(self, nss_home: Path | str | None = None, headless: bool = True):
-        """Loguea al SII con un Chromium real (Playwright), usando el certificado
-        digital ya instalado en el sistema operativo donde corre este código.
+    def login_with_browser(self, headless: bool = True, timeout: float = 45000):
+        """Loguea al SII con un Chromium real (Playwright) usando el certificado digital.
 
-        Mecánica confirmada (el login manual del usuario en su propio Chrome de
-        Windows funcionó; ver docstring del módulo para el detalle de por qué el
-        sandbox de Claude en la nube no puede completar este mismo paso — no es un
-        problema de este código, es el proxy interceptor del sandbox):
+        Confirmado funcionando end-to-end contra el SII de producción. El flujo real es:
 
-        1. Chrome/Chromium tiene que encontrar el certificado del cliente en el
-           almacén de certificados del sistema operativo:
-           - **Windows** (caso de uso actual): usa el almacén nativo de Windows
-             (CryptoAPI/CNG) automáticamente. Si el .pfx ya fue importado ahí (Panel
-             de control → Administrar certificados de usuario, o simplemente al
-             haberlo usado antes en el navegador), no hace falta ningún paso extra:
-             se puede dejar `nss_home=None`.
-           - **Linux**: Chrome/Chromium lee la base NSS en `~/.pki/nssdb`. Para ese
-             caso hay que pasar `nss_home` apuntando a un directorio con el
-             certificado ya importado ahí (con `certutil`/`pk12util`), y este método
-             lo usa como el `HOME` del proceso del navegador.
-        2. Se lanza Chromium con `--auto-select-certificate-for-urls` apuntando a
-           `https://[*.]sii.cl`, para que no dependa de un diálogo humano de selección
-           de certificado.
-        3. Se navega a `https://misiir.sii.cl/cgi_misii/siihome.cgi` (el link real de
-           "Ingresar a Mi Sii") y se hace clic en "Ingresar con Certificado Digital".
+            misiir/siihome.cgi
+              → zeusr/IngresoRutClave.html          (pantalla de RUT+clave)
+              → [click "Ingresar con Certificado Digital"]
+              → zeusr/IngresoCertificado.html       (muestra un confirm() y auto-envía
+                                                     un form por POST)
+              → herculesr/cgi_AUT2000/CAutInicio.cgi (TLS mutuo: acá va el certificado)
 
-        Devuelve la instancia de `Page` de Playwright ya autenticada (o no — quien llama
-        debe verificar el resultado buscando el nombre/RUT del contribuyente en la
-        página, tal como se hizo en las pruebas), para poder seguir navegando el RCV/BHE
-        desde el mismo contexto de navegador.
+        Dos detalles sin los cuales esto falla en silencio, devolviendo la home pública
+        del SII en vez de un error (ver el docstring del módulo para el detalle):
+
+        - Hay que **aceptar el confirm()**; Playwright descarta los diálogos por defecto
+          y la rama `else` del SII redirige a www.sii.cl.
+        - Hay que presentar el certificado con `client_certificates`, en PEM (el .pfx
+          de E-CERTCHILE usa un algoritmo que OpenSSL 3 rechaza).
+
+        Si el RUT está autorizado para representar a otros contribuyentes, el SII
+        intercala una pantalla "ESCOJA COMO DESEA INGRESAR". Este método elige
+        "Continuar" (trámites propios), que es el caso de uso del proyecto.
+
+        Devuelve (page, context, browser, playwright) con la sesión ya iniciada, o
+        lanza SIIAuthenticationError si no lo logró — nunca devuelve una página sin
+        autenticar haciéndola pasar por buena.
         """
-        import os
-
         from playwright.sync_api import sync_playwright  # import diferido: dependencia pesada
 
-        auto_select = json.dumps([{"pattern": "https://[*.]sii.cl", "filter": {}}])
-
-        launch_kwargs: dict = {
-            "headless": headless,
-            "args": [f"--auto-select-certificate-for-urls={auto_select}"],
-        }
-        if nss_home is not None:
-            # Importante: mezclar con el entorno actual, nunca reemplazarlo entero,
-            # o se pierden variables como HTTPS_PROXY/PATH y el navegador deja de
-            # poder salir a internet.
-            launch_kwargs["env"] = {**os.environ, "HOME": str(nss_home)}
+        if not self._cert_pem_file:
+            self._load_pkcs12()
 
         playwright = sync_playwright().start()
-        browser = playwright.chromium.launch(**launch_kwargs)
-        context = browser.new_context()
+        browser = playwright.chromium.launch(headless=headless)
+        context = browser.new_context(
+            client_certificates=[
+                {
+                    "origin": SII_CERT_AUTH_ORIGIN,
+                    "certPath": str(self._cert_pem_file),
+                    "keyPath": str(self._key_pem_file),
+                }
+            ]
+        )
         page = context.new_page()
-        page.goto("https://misiir.sii.cl/cgi_misii/siihome.cgi", wait_until="networkidle", timeout=30000)
-        page.click("text=Ingresar con Certificado Digital", force=True, timeout=15000)
-        page.wait_for_load_state("networkidle", timeout=30000)
+        page.on("dialog", lambda dialogo: dialogo.accept())
+
+        try:
+            page.goto(SII_MISII_HOME, wait_until="domcontentloaded", timeout=timeout)
+            page.click("text=Ingresar con Certificado Digital", timeout=timeout / 2)
+            page.wait_for_load_state("networkidle", timeout=timeout)
+
+            # Pantalla de representación: seguir como el propio contribuyente.
+            # Por rol y texto exacto: un `text=Continuar` genérico engancha un
+            # contenedor oculto del menú y el click se queda esperando visibilidad.
+            continuar = page.get_by_role("link", name="Continuar", exact=True)
+            if continuar.count() > 0:
+                continuar.first.click()
+                page.wait_for_load_state("networkidle", timeout=timeout)
+
+            texto = page.inner_text("body")
+            rut_plano = self.rut.replace(".", "").replace("-", "")
+            autenticado = "Cerrar Sesión" in texto or rut_plano[:8] in texto.replace(".", "").replace("-", "")
+            if not autenticado:
+                raise SIIAuthenticationError(
+                    "El flujo de login terminó sin sesión iniciada. "
+                    f"URL final: {page.url}. Primeros 300 caracteres de la página: "
+                    f"{texto[:300]!r}"
+                )
+        except Exception:
+            context.close()
+            browser.close()
+            playwright.stop()
+            raise
+
         return page, context, browser, playwright
 
     # ---------- Pendiente de validar con el resultado de login_with_browser() ----------

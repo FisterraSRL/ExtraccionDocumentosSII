@@ -59,8 +59,18 @@ La API queda en `http://localhost:8000`. Docs automáticas de FastAPI en `http:/
 1. Colocar el certificado `.pfx` en una ruta fuera del repo (por ejemplo `secrets/certificado.pfx`, ya excluida en `.gitignore`) y completar `.env` con `SII_RUT`, `SII_CERT_PATH` y `SII_CERT_PASSWORD`.
 2. Correr `python scripts/test_sii_connection.py` — valida que el certificado cargue y que el SII responda a la autenticación. A partir de ese resultado definimos si el camino es el servicio web de Intercambio o automatización del portal.
 
-## Dónde correr esto ahora (importante)
+## Estado del login al SII (actualizado 16-sep-2026)
 
-El login al SII con certificado digital **no puede completarse desde el sandbox de Claude en la nube**: ese entorno sale a internet a través de un proxy que intercepta y re-firma el TLS, así que el certificado del cliente nunca le llega realmente al SII (se confirmó probando tanto con `requests` como con un Chromium real vía Playwright, ambos fallaron igual). Esto no es un problema del código ni del certificado — el mismo login manual ya funcionó en el Chrome de la PC de Fisterra.
+`SIIClient.login_with_browser()` **funciona**: autentica contra el SII de producción con
+el certificado digital y desde esa sesión se llega al Registro de Compras y Ventas.
 
-Por eso, hasta que se defina un hosting en la nube sin proxy interceptor obligatorio, **el desarrollo y las pruebas de esta parte corren en tu PC de Windows**. Ver `SETUP_WINDOWS.md` para la guía paso a paso (incluye instalar `playwright install chromium`, que es nuevo desde que se agregó la automatización de navegador para el login).
+Si leíste una versión anterior de este README: la explicación de que el login fallaba por
+un *proxy TLS interceptor* en la nube **quedó descartada**. El fallo real era del lado del
+cliente — Playwright descartaba automáticamente un `confirm()` de JavaScript del SII cuya
+rama de cancelación redirige a `www.sii.cl`, y el certificado nunca llegaba a presentarse
+porque `--auto-select-certificate-for-urls` no es un switch de Chromium. El detalle
+completo está en el docstring de `app/sii/client.py` y en `AGENTS.md`.
+
+Consecuencia práctica: el certificado se lee del `.pfx` en disco, **no** del almacén del
+sistema operativo, así que esto es portable a Linux/contenedor/cloud. La guía de
+`SETUP_WINDOWS.md` sigue siendo válida para correrlo localmente.

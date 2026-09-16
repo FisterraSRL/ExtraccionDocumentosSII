@@ -16,19 +16,20 @@ factura/boleta/nota de crédito del SII a Finnegans.
 ## Estado actual (resumen ejecutivo)
 
 - **Funciona hoy:** carga del certificado digital (.pfx), test de conexión TLS al SII,
-  el backend completo (FastAPI + SQLAlchemy + endpoints REST), y el portal web
-  ("Bandeja SII") servido por el propio backend, con la identidad de marca de Fisterra,
-  ya conectado a la API real (no hay datos de ejemplo).
+  **el login automatizado al SII** (`login_with_browser()`, confirmado end-to-end contra
+  producción — ver la sección del login más abajo), el backend completo (FastAPI +
+  SQLAlchemy + endpoints REST), y el portal web ("Bandeja SII") servido por el propio
+  backend, con la identidad de marca de Fisterra, ya conectado a la API real (no hay
+  datos de ejemplo).
 - **No funciona todavía (a propósito, con errores explícitos, no simulado):**
   extraer documentos reales del SII (`get_rcv`/`get_bhe`/`get_dte_xml` están sin
   implementar — falta mapear la navegación real del portal del SII) y enviar a
   Finnegans (`FinnegansClient.send_document` sin implementar — falta la documentación
   de su API, todavía no la pasó el usuario).
-- **Restricción de entorno crítica, leer antes de perder tiempo debuggeando:** ver
-  la sección "⚠️ Restricción de entorno" más abajo. Resumen: el login por certificado
-  al SII **no puede probarse desde un entorno con proxy de salida que intercepta TLS**
-  (típico de sandboxes de agentes en la nube). Hay que correr esto en una máquina con
-  salida directa a internet — hoy, la PC de Windows del usuario.
+- **Si venís de una versión anterior de este documento:** la "restricción de entorno
+  por proxy TLS interceptor" que se daba por cierta **quedó descartada**. No era la
+  causa del fallo de login. Ver la sección "✅ Login al SII: RESUELTO" más abajo antes
+  de tomar cualquier decisión de infraestructura basada en aquello.
 
 ## Stack técnico
 
@@ -96,41 +97,55 @@ SETUP_WINDOWS.md       → Guía paso a paso para correr todo (backend + portal)
 requirements.txt       → Dependencias Python.
 ```
 
-## ⚠️ Restricción de entorno: proxy TLS interceptor
+## ✅ Login al SII: RESUELTO (16-sep-2026) — leer antes de tocar `sii/client.py`
 
-Esto costó varias horas de debugging, documentado acá para que no se repita:
+`SIIClient.login_with_browser()` **funciona**, confirmado end-to-end contra el SII de
+producción: inicia sesión, y desde esa sesión se llega al Registro de Compras y Ventas
+(`https://www4.sii.cl/consdcvinternetui/#/index`), que lista las empresas a las que el
+RUT tiene acceso.
 
-**El login por certificado digital al SII NO puede completarse desde un entorno cuya
-salida a internet pasa por un proxy que intercepta y re-firma TLS** (MITM transparente,
-común en sandboxes de agentes en la nube para poder filtrar por dominio permitido).
+**Corrección importante de una conclusión anterior de este documento.** Durante varias
+sesiones se sostuvo que el login fallaba por un *proxy TLS interceptor* en el sandbox de
+la nube. **Esa hipótesis era incorrecta.** El mismo síntoma (redirect a `www.sii.cl`)
+aparecía en la PC de Windows del usuario, con salida directa a internet. Las causas
+reales eran dos, ambas del lado del cliente:
 
-Se probó de tres formas distintas, con el certificado real:
-1. Navegador real del usuario en su propia PC de Windows (certificado importado al
-   almacén nativo del SO) → **funcionó**, login confirmado.
-2. Script Python (`requests`, mutual TLS) desde un sandbox con proxy interceptor →
-   falló con un error genérico del SII y redirect a `http://www.sii.cl`.
-3. Chromium real vía Playwright desde el mismo sandbox, con el certificado importado a
-   una base NSS y `--auto-select-certificate-for-urls` → **mismo error que el script
-   simple**, mismo redirect.
+1. **El `confirm()` de JavaScript.** La página `zeusr.sii.cl/AUT2000/InicioAutenticacion/
+   IngresoCertificado.html` muestra un `confirm()` antes de auto-enviar el formulario de
+   autenticación, y su rama `else` es literalmente `location.replace('http://www.sii.cl')`.
+   Playwright **descarta los diálogos por defecto**, así que el `confirm()` devolvía
+   `false` y el navegador se iba solo a la home pública. Ese redirect, que se venía
+   leyendo como "el SII rechazó el certificado", era en realidad el flujo de cancelación.
+   Solución: `page.on("dialog", lambda d: d.accept())`.
 
-Que un navegador real con el certificado bien puesto falle exactamente igual que un
-script simple descarta que sea detección de bot. La explicación real: con un proxy que
-intercepta TLS, la conexión mutua TLS se completa entre el proxy y el SII — el
-certificado del cliente nunca sale realmente hacia el SII real, sin importar qué
-herramienta de automatización se use desde ese entorno.
+2. **El certificado nunca se presentaba.** El código usaba
+   `--auto-select-certificate-for-urls`, que **no es un switch de línea de comandos de
+   Chromium** — es una política de empresa (registro de Windows). Chromium lo ignoraba
+   en silencio. Solución: la opción `client_certificates` de Playwright (>=1.46).
 
-**Conclusión práctica:** si estás corriendo como agente dentro de un sandbox en la nube
-con proxy de salida obligatorio (probá `curl -v` a `https://www.sii.cl` y fijate si hay
-un `HTTPS_PROXY` seteado, o si el certificado que presenta el servidor en el handshake
-no es el real de sii.cl), **no vas a poder validar el login al SII desde ahí**, por
-más que el código esté perfecto. No es un bug a arreglar en el código. Las alternativas
-son: (a) pedirle al usuario que corra la prueba en su propia máquina y te pase el
-resultado, o (b) si tenés acceso a una shell real en la máquina del usuario (sin proxy
-interceptor), correr ahí directamente.
+   Detalle adicional: el `.pfx` de E-CERTCHILE usa un algoritmo que OpenSSL 3 rechaza
+   ("Unsupported TLS certificate"), así que `pfxPath` falla. Hay que pasarle los PEM que
+   `_load_pkcs12()` ya produce (`certPath`/`keyPath`).
 
-Esto **no debería aplicar** a un servidor de producción real bien elegido (que salga
-directo a internet) — es un requisito a validar al elegir dónde hostear en la nube más
-adelante (ver Pendientes).
+Datos concretos del flujo, por si hay que volver a depurarlo:
+
+```
+misiir.sii.cl/cgi_misii/siihome.cgi
+  → zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoRutClave.html
+  → [click "Ingresar con Certificado Digital"]
+  → zeusr.sii.cl/AUT2000/InicioAutenticacion/IngresoCertificado.html   (confirm() + POST)
+  → herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi                        (TLS mutuo)
+```
+
+`herculesr.sii.cl` es el host que hace la autenticación TLS mutua. Se verificó aparte,
+con `requests`, que acepta el handshake con este certificado y responde 200.
+
+**Consecuencias para la infraestructura.** El certificado ya **no** necesita estar en el
+almacén del sistema operativo: se lee del `.pfx` en disco. Eso vuelve el login portable
+(Linux, contenedor, cloud) y elimina el parámetro `nss_home`. Y el requisito de "salida a
+internet sin proxy interceptor" queda **sin fundamento confirmado** — se derivaba de la
+hipótesis descartada. Habrá que reprobarlo en el entorno de destino, pero ya no es una
+restricción conocida a la hora de elegir hosting.
 
 ## Certificado y credenciales — SEGURIDAD
 
@@ -219,14 +234,14 @@ automáticas en `http://localhost:8000/docs`.
 
 ## Pendiente / próximos pasos, en orden
 
-1. **Confirmar el login automatizado por navegador** (`SIIClient.login_with_browser()`)
-   corriendo en la PC de Windows del usuario (o cualquier entorno sin proxy
-   interceptor) — hay un script de prueba en `scripts/probar_login_navegador.py` (si
-   no existe en tu checkout, es porque se armó fuera de este repo; recrearlo es
-   trivial: instanciar `SIIClient`, llamar `login_with_browser(headless=False)`, y
-   verificar visualmente que quedó logueado).
+1. ~~Confirmar el login automatizado por navegador~~ **HECHO** (16-sep-2026).
+   `login_with_browser()` autentica y lanza `SIIAuthenticationError` si no lo logra.
+   Script de prueba manual en `scripts/probar_login_navegador.py`.
 2. **Mapear la navegación real** del RCV y del módulo de BHE dentro de "Mi SII" una
-   vez logueado (URLs exactas, cómo se ve/exporta el XML de cada documento) e
+   vez logueado. Punto de partida ya confirmado: con la sesión iniciada,
+   `https://www4.sii.cl/consdcvinternetui/#/index` abre el Registro de Compras y Ventas
+   y presenta un selector con las empresas a las que el RUT tiene acceso (hay 8; la del
+   proyecto es 10439188-5) — falta mapear desde ahí los períodos, el detalle y el XML. E
    implementar `get_rcv()`, `get_bhe()`, `get_dte_xml()` en `app/sii/client.py`, más la
    persistencia en `POST /api/sync` (hoy tiene un TODO explícito: "persistir rcv + bhe
    como Documento, evitando duplicados por (tipo, folio, proveedor_rut)").

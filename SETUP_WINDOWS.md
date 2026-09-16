@@ -1,12 +1,14 @@
 # Cómo correr esto en tu PC con Windows
 
-Este es el entorno recomendado por ahora para la parte de login al SII: es el único donde ya confirmamos que el certificado funciona (te logueaste manualmente en tu propio Chrome). El sandbox de Claude en la nube no puede completar ese login porque sale a internet a través de un proxy que intercepta el TLS — el detalle está en el docstring de `app/sii/client.py` y en el documento de requisitos del proyecto.
+Guía para correr el proyecto completo (backend + portal + login al SII) en tu PC.
+
+**Nota (16-sep-2026):** una versión anterior de esta guía decía que este era el único entorno posible, por un supuesto proxy que interceptaba el TLS. Esa explicación quedó descartada — el login fallaba por otro motivo, ya corregido (ver `AGENTS.md`). El certificado se lee del `.pfx` en disco, no del almacén de Windows, así que esto también corre en Linux o en un contenedor.
 
 ## 1. Requisitos previos
 
 - **Python 3.11 o superior** instalado. Verificá con `python --version` en una consola (PowerShell o CMD). Si no lo tenés: [python.org/downloads](https://www.python.org/downloads/) — al instalar, marcá la casilla "Add python.exe to PATH".
 - **Git** (para poder hacer `git push` del repo). Si no lo tenés: [git-scm.com](https://git-scm.com/download/win).
-- El certificado ya lo tenés instalado en Windows (lo usaste para loguearte manualmente), así que no hace falta ningún paso de importación adicional.
+- **No** hace falta importar el certificado en Windows ni en el navegador: el código lee el `.pfx` directamente desde la ruta que indiques en `SII_CERT_PATH`.
 
 ## 2. Clonar el repo (si todavía no lo tenés local)
 
