@@ -58,3 +58,9 @@ La API queda en `http://localhost:8000`. Docs automáticas de FastAPI en `http:/
 
 1. Colocar el certificado `.pfx` en una ruta fuera del repo (por ejemplo `secrets/certificado.pfx`, ya excluida en `.gitignore`) y completar `.env` con `SII_RUT`, `SII_CERT_PATH` y `SII_CERT_PASSWORD`.
 2. Correr `python scripts/test_sii_connection.py` — valida que el certificado cargue y que el SII responda a la autenticación. A partir de ese resultado definimos si el camino es el servicio web de Intercambio o automatización del portal.
+
+## Dónde correr esto ahora (importante)
+
+El login al SII con certificado digital **no puede completarse desde el sandbox de Claude en la nube**: ese entorno sale a internet a través de un proxy que intercepta y re-firma el TLS, así que el certificado del cliente nunca le llega realmente al SII (se confirmó probando tanto con `requests` como con un Chromium real vía Playwright, ambos fallaron igual). Esto no es un problema del código ni del certificado — el mismo login manual ya funcionó en el Chrome de la PC de Fisterra.
+
+Por eso, hasta que se defina un hosting en la nube sin proxy interceptor obligatorio, **el desarrollo y las pruebas de esta parte corren en tu PC de Windows**. Ver `SETUP_WINDOWS.md` para la guía paso a paso (incluye instalar `playwright install chromium`, que es nuevo desde que se agregó la automatización de navegador para el login).

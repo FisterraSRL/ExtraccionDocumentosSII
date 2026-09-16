@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bandeja SII · Fisterra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* ---------- Marca Fisterra ---------- */
+    --fs-red:#F52125;
+    --fs-red-deep:#9C3032;
+    --fs-navy:#0A2F43;
+    --fs-ink:#202B56;
+
+    /* ---------- Neutrales ---------- */
+    --fs-surface:#D7D8DD;
+    --fs-surface-low:#B8C4D4;
+    --fs-surface-high:#E4E5E9;
+    --fs-steel:#A3ABB6;
+    --fs-steel-deep:#6E7A88;
+    --fs-white:#FFFFFF;
+
+    /* ---------- Degradés ---------- */
+    --fs-gradient-navy:linear-gradient(100deg,#A8B4C4 0%,#15384B 45%,#0A2F43 100%);
+    --fs-gradient-navy-solid:linear-gradient(100deg,#1C4257 0%,#0A2F43 100%);
+    --fs-gradient-surface:linear-gradient(160deg,#E4E5E9 0%,#D7D8DD 45%,#B8C4D4 100%);
+    --fs-gradient-chip:linear-gradient(90deg,#C3CAD4 0%,#9FAFC2 100%);
+
+    /* ---------- Semántico (estados de documento) ---------- */
+    --st-pending-fg:#8A6416; --st-pending-bg:#EFE6C9; --st-pending-border:#D9C79A;
+    --st-sent-fg:#1F6B52;    --st-sent-bg:#DCEAE3;    --st-sent-border:#B7D4C6;
+    --st-error-fg:#9C3032;   --st-error-bg:#F3DEDD;   --st-error-border:#E1BAB8;
+    --st-ok-fg:#1F6B52;      --st-ok-bg:#DCEAE3;      --st-ok-border:#B7D4C6;
+
+    /* ---------- Tipografía ---------- */
+    --fs-font:"Montserrat","Segoe UI",system-ui,-apple-system,sans-serif;
+
+    /* ---------- Radios / trazos ---------- */
+    --fs-radius-pill:999px;
+    --fs-radius-panel:28px;
+    --fs-radius-media:16px;
+    --fs-radius-tab:12px 12px 0 0;
+    --fs-hairline:1.5px solid rgba(255,255,255,.85);
+    --fs-shadow-panel:0 2px 20px rgba(10,47,67,.06);
+  }
+
+  *{box-sizing:border-box;}
+  [hidden]{display:none !important;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--fs-gradient-surface);
+    color:var(--fs-ink);
+    font-family:var(--fs-font);
+    padding-inline:20px;
+    padding-block:26px 64px;
+    min-height:100vh;
+  }
+  .wrap{max-width:1180px; margin-inline:auto; display:flex; flex-direction:column; gap:22px;}
+
+  /* ---------- Header ---------- */
+  .header-row{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+  .section-pill{
+    background:var(--fs-gradient-navy); color:var(--fs-white); font-weight:500; font-size:.78rem;
+    text-transform:uppercase; letter-spacing:.08em; padding:.55em 1.5em .55em 1.8em; border-radius:var(--fs-radius-pill);
+    margin-left:-20px;
+  }
+  .lockup{height:30px; width:auto; flex:none;}
+
+  .title-block{display:flex; flex-direction:column; gap:10px;}
+  .titular{font-size:2.35rem; line-height:1.05; letter-spacing:-.01em;}
+  .titular .l1{display:block; font-weight:700; color:var(--fs-red);}
+  .titular .l2{display:block; font-weight:400; color:var(--fs-ink);}
+  .subtitle{font-size:.95rem; color:var(--fs-steel-deep); font-weight:500; max-width:46ch;}
+  .conn-tag{
+    align-self:flex-start; font-size:.72rem; font-weight:700; padding:3px 10px; border-radius:var(--fs-radius-pill);
+    letter-spacing:.02em; border:1.5px solid transparent; display:inline-flex; align-items:center; gap:6px;
+  }
+  .conn-tag.ok{background:var(--st-ok-bg); color:var(--st-ok-fg); border-color:var(--st-ok-border);}
+  .conn-tag.error{background:var(--st-error-bg); color:var(--st-error-fg); border-color:var(--st-error-border);}
+  .conn-tag.loading{background:rgba(255,255,255,.4); color:var(--fs-steel-deep); border-color:var(--fs-steel);}
+  .conn-dot{width:7px; height:7px; border-radius:50%; background:currentColor; flex:none;}
+
+  .sync-block{display:flex; flex-direction:column; align-items:flex-end; gap:8px;}
+  .sync-meta{font-size:.76rem; color:var(--fs-steel-deep); font-weight:600; font-variant-numeric:tabular-nums; text-align:right; max-width:280px;}
+
+  .btn{
+    font-family:inherit; font-size:.86rem; font-weight:700; border-radius:var(--fs-radius-pill); padding:.75em 1.5em;
+    border:1.5px solid transparent; cursor:pointer; display:inline-flex; align-items:center; gap:9px;
+    transition:filter .12s ease, transform .06s ease, background .12s ease;
+  }
+  .btn:active{transform:translateY(1px);}
+  .btn-cta{background:var(--fs-red); color:var(--fs-white);}
+  .btn-cta:hover{background:var(--fs-red-deep);}
+  .btn-cta:disabled{opacity:.65; cursor:progress;}
+  .btn-ghost{background:rgba(255,255,255,.5); color:var(--fs-ink); border-color:rgba(255,255,255,.85);}
+  .btn-ghost:hover{background:rgba(255,255,255,.75);}
+  .btn:focus-visible, input:focus-visible, .tab-btn:focus-visible, .chevron-btn:focus-visible, .link-btn:focus-visible, select:focus-visible{
+    outline:2px solid var(--fs-navy); outline-offset:2px;
+  }
+
+  /* ---------- KPI ---------- */
+  .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
+  .kpi{
+    background:rgba(255,255,255,.55); border:var(--fs-hairline); border-radius:16px; padding:14px 16px;
+    display:flex; flex-direction:column; gap:5px; box-shadow:var(--fs-shadow-panel);
+  }
+  .kpi-label{font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--fs-steel-deep); font-weight:700;}
+  .kpi-value{font-size:1.7rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1;}
+  .kpi-sub{font-size:.76rem; color:var(--fs-steel-deep); font-weight:500;}
+  .kpi.pending .kpi-value{color:var(--fs-red);}
+  .kpi.error .kpi-value{color:var(--fs-red-deep);}
+  .kpi.total .kpi-value{color:var(--fs-navy);}
+
+  /* ---------- Tabs + panel ---------- */
+  .tabs{display:flex; gap:4px; padding-left:6px;}
+  .tab-btn{
+    font-family:inherit; font-size:.8rem; font-weight:700; letter-spacing:.02em; color:var(--fs-white);
+    background:var(--fs-steel); border:none; border-radius:var(--fs-radius-tab); padding:.7em 1.4em; cursor:pointer;
+  }
+  .tab-btn.active{background:var(--fs-gradient-navy-solid);}
+  .tab-btn:hover:not(.active){filter:brightness(1.05);}
+
+  .panel{
+    background:var(--fs-surface-high); border:var(--fs-hairline); border-radius:0 var(--fs-radius-panel) var(--fs-radius-panel) var(--fs-radius-panel);
+    box-shadow:var(--fs-shadow-panel); overflow:hidden;
+  }
+  .panel-inner{padding:18px 18px 4px;}
+
+  .filters{display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding-bottom:16px;}
+  .search-field{position:relative; flex:1 1 220px; min-width:180px;}
+  .search-field input{
+    width:100%; font-family:inherit; font-size:.86rem; padding:9px 12px 9px 32px; border-radius:10px;
+    border:1.5px solid var(--fs-steel); background:rgba(255,255,255,.6); color:var(--fs-ink); font-weight:500;
+  }
+  .search-field input::placeholder{color:var(--fs-steel-deep);}
+  .search-field::before{
+    content:"⌕"; position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--fs-steel-deep); font-size:1rem;
+  }
+  select{
+    font-family:inherit; font-size:.82rem; font-weight:600; padding:9px 12px; border-radius:10px;
+    border:1.5px solid var(--fs-steel); background:rgba(255,255,255,.6); color:var(--fs-ink);
+  }
+  .filters .clear-btn{
+    font-family:inherit; font-size:.8rem; font-weight:700; color:var(--fs-steel-deep); background:none; border:none; cursor:pointer;
+    text-decoration:underline; text-underline-offset:2px; padding:4px 2px; margin-left:auto;
+  }
+  .filters .clear-btn:hover{color:var(--fs-ink);}
+
+  /* ---------- Bulk bar ---------- */
+  .bulk-bar{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    background:var(--fs-gradient-chip); border:var(--fs-hairline); border-radius:14px; padding:11px 16px; margin-bottom:14px;
+    font-weight:600; font-size:.88rem; color:var(--fs-ink);
+  }
+  .bulk-bar strong{font-variant-numeric:tabular-nums;}
+  .bulk-actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+
+  /* ---------- Table ---------- */
+  .table-wrap{overflow-x:auto; border-radius:var(--fs-radius-media); background:rgba(255,255,255,.5);}
+  table{width:100%; border-collapse:collapse; min-width:760px;}
+  thead th{
+    text-align:left; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--fs-steel-deep);
+    font-weight:700; padding:11px 14px; border-bottom:1.5px solid var(--fs-steel); white-space:nowrap;
+  }
+  thead th.num, td.num{text-align:right;}
+  tbody td{padding:12px 14px; border-bottom:1px solid rgba(163,171,182,.4); vertical-align:top; font-size:.87rem;}
+  tbody tr.doc-row:hover{background:rgba(184,196,212,.18);}
+  tbody tr.doc-row.selected{background:rgba(184,196,212,.32);}
+  .mono{font-variant-numeric:tabular-nums;}
+  .muted{color:var(--fs-steel-deep);}
+  .small{font-size:.78rem;}
+  .doc-type{
+    display:inline-block; font-size:.7rem; font-weight:700; padding:3px 9px; border-radius:6px;
+    background:var(--fs-surface); border:1px solid var(--fs-steel); color:var(--fs-steel-deep); white-space:nowrap;
+  }
+  .provider-name{font-weight:600; color:var(--fs-ink);}
+  input[type="checkbox"]{width:16px; height:16px; accent-color:var(--fs-navy); cursor:pointer;}
+  .pill{
+    display:inline-flex; align-items:center; gap:6px; font-size:.76rem; font-weight:700; padding:4px 11px;
+    border-radius:var(--fs-radius-pill); border:1px solid transparent; white-space:nowrap;
+  }
+  .pill.pending{background:var(--st-pending-bg); color:var(--st-pending-fg); border-color:var(--st-pending-border);}
+  .pill.sent{background:var(--st-sent-bg); color:var(--st-sent-fg); border-color:var(--st-sent-border);}
+  .pill.error{background:var(--st-error-bg); color:var(--st-error-fg); border-color:var(--st-error-border);}
+  .estado-cell{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .link-btn{
+    font-family:inherit; font-size:.8rem; font-weight:700; background:none; border:none; color:var(--fs-navy);
+    cursor:pointer; padding:2px 0; text-decoration:underline; text-underline-offset:2px;
+  }
+  .link-btn:hover{color:var(--fs-red);}
+  .chevron-btn{
+    background:rgba(255,255,255,.6); border:1px solid var(--fs-steel); border-radius:8px; width:28px; height:28px; color:var(--fs-steel-deep);
+    cursor:pointer; font-size:.85rem; line-height:1; transition:transform .15s ease, background .15s ease;
+  }
+  .chevron-btn:hover{background:var(--fs-white);}
+  .chevron-btn[aria-expanded="true"]{transform:rotate(180deg); color:var(--fs-navy);}
+  .spinner{
+    width:10px; height:10px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent;
+    animation:spin .7s linear infinite; display:inline-block;
+  }
+  @media (prefers-reduced-motion: reduce){ .spinner{animation:none; border-right-color:currentColor;} }
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* ---------- Detail panel ---------- */
+  tr.detail-row td{background:rgba(255,255,255,.35); padding:0; border-bottom:1px solid rgba(163,171,182,.4);}
+  .detail-panel{padding:16px 20px 20px 46px; display:flex; flex-direction:column; gap:12px;}
+  .detail-note{
+    font-size:.85rem; color:var(--fs-ink); background:rgba(255,255,255,.6); border:1px solid var(--fs-steel);
+    border-radius:10px; padding:9px 13px; font-weight:500;
+  }
+  .items-table{width:100%; border-collapse:collapse; font-size:.85rem;}
+  .items-table th{text-align:left; font-weight:700; color:var(--fs-steel-deep); font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; padding:6px 10px; border-bottom:1.5px solid var(--fs-steel);}
+  .items-table td{padding:7px 10px; border-bottom:1px solid rgba(163,171,182,.35);}
+  .items-table th.num, .items-table td.num{text-align:right;}
+  .items-table tfoot td{border-bottom:none; padding-top:8px;}
+  .totals-line{display:flex; justify-content:flex-end; gap:20px; padding-top:6px; font-size:.85rem;}
+  .totals-line b{font-variant-numeric:tabular-nums; color:var(--fs-ink);}
+  .xml-toggle{align-self:flex-start;}
+  .xml-box{
+    background:var(--fs-navy); color:#DCE6EC; border-radius:10px; padding:12px 14px; font-size:.76rem;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-word;
+    max-height:280px; overflow:auto; line-height:1.5;
+  }
+  .bhe-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; max-width:640px;}
+  .bhe-field dt{font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; color:var(--fs-steel-deep); margin-bottom:2px; font-weight:700;}
+  .bhe-field dd{margin:0; font-size:.92rem; font-variant-numeric:tabular-nums; color:var(--fs-ink); font-weight:600;}
+
+  /* ---------- Modal ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(10,47,67,.55); display:flex; align-items:center; justify-content:center;
+    padding:20px; z-index:50;
+  }
+  .modal{
+    background:var(--fs-surface-high); border:var(--fs-hairline); border-radius:var(--fs-radius-panel); max-width:460px; width:100%;
+    padding:24px; display:flex; flex-direction:column; gap:14px; box-shadow:var(--fs-shadow-panel);
+  }
+  .modal h2{margin:0; font-size:1.1rem; font-weight:700; color:var(--fs-ink);}
+  .modal-error{
+    background:var(--st-error-bg); border:1px solid var(--st-error-border); color:var(--st-error-fg); border-radius:10px;
+    padding:11px 13px; font-size:.86rem; line-height:1.45; font-weight:500;
+  }
+  .modal-meta{font-size:.83rem; color:var(--fs-steel-deep); display:flex; flex-direction:column; gap:2px; font-weight:600;}
+  .modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:4px;}
+
+  /* ---------- Toast ---------- */
+  .toast{
+    position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(8px); background:var(--fs-gradient-navy-solid);
+    color:var(--fs-white); font-size:.85rem; font-weight:600; padding:11px 20px; border-radius:var(--fs-radius-pill); box-shadow:var(--fs-shadow-panel);
+    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease; z-index:60; max-width:min(90vw,520px); text-align:center;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .toast.err{background:var(--fs-red-deep);}
+
+  .empty-state{padding:36px 20px; text-align:center; color:var(--fs-steel-deep); font-size:.9rem; font-weight:500;}
+
+  @media (max-width:640px){
+    .kpis{grid-template-columns:repeat(2,1fr);}
+    .header-row{flex-direction:column;}
+    .sync-block{align-items:flex-start; width:100%;}
+    .sync-block .btn{width:100%; justify-content:center;}
+    .titular{font-size:1.9rem;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="header-row">
+    <span class="section-pill">Documentos SII</span>
+    <svg class="lockup" viewBox="0 0 520 100" role="img" aria-label="Fisterra">
+      <title>Fisterra</title>
+      <g transform="translate(0,4) scale(0.92)">
+        <path d="M50 0 L0 100 Q25 95.2 50 95.2 Z" fill="#F52125"/>
+        <path d="M50 0 L50 95.2 Q75 95.2 100 100 Z" fill="#9C3032"/>
+      </g>
+      <text x="140" y="72" font-family="Montserrat,'Segoe UI',system-ui,sans-serif" font-size="68" font-weight="400" letter-spacing="1" fill="#0A2F43">FISTERRA</text>
+    </svg>
+  </div>
+
+  <div class="header-row" style="align-items:center;">
+    <div class="title-block">
+      <div class="titular">
+        <span class="l1">BANDEJA</span>
+        <span class="l2">de documentos recibidos</span>
+      </div>
+      <div class="subtitle">Revisá lo que llegó del SII y elegí qué mandar a Finnegans.</div>
+      <span class="conn-tag loading" id="connTag"><span class="conn-dot"></span><span id="connTagText">Conectando con el backend…</span></span>
+    </div>
+    <div class="sync-block">
+      <button class="btn btn-cta" id="syncBtn" type="button">
+        <span id="syncIcon">↻</span><span id="syncLabel">Sincronizar con SII</span>
+      </button>
+      <div class="sync-meta" id="syncMeta">Sin sincronizar todavía</div>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi pending">
+      <div class="kpi-label">Pendientes de envío</div>
+      <div class="kpi-value" id="kpiPendingCount">–</div>
+      <div class="kpi-sub" id="kpiPendingSum">–</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Enviados</div>
+      <div class="kpi-value" id="kpiSentCount">–</div>
+      <div class="kpi-sub">a Finnegans</div>
+    </div>
+    <div class="kpi error">
+      <div class="kpi-label">Con error</div>
+      <div class="kpi-value" id="kpiErrorCount">–</div>
+      <div class="kpi-sub">requieren revisión</div>
+    </div>
+    <div class="kpi total">
+      <div class="kpi-label">Total en bandeja</div>
+      <div class="kpi-value" id="kpiTotalCount">–</div>
+      <div class="kpi-sub" id="kpiTotalSum">–</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="tabs" id="estadoTabs">
+      <button class="tab-btn active" data-estado="todos" type="button">Todos</button>
+      <button class="tab-btn" data-estado="pendiente" type="button">Pendientes</button>
+      <button class="tab-btn" data-estado="enviado" type="button">Enviados</button>
+      <button class="tab-btn" data-estado="error" type="button">Con error</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-inner">
+        <div class="filters">
+          <div class="search-field">
+            <input type="text" id="searchInput" placeholder="Buscar por proveedor, RUT o folio" aria-label="Buscar">
+          </div>
+          <select id="tipoFilter" aria-label="Filtrar por tipo de documento">
+            <option value="todos">Todos los documentos</option>
+            <optgroup label="Registro de Compras y Ventas">
+              <option value="33">Factura afecta</option>
+              <option value="34">Factura exenta</option>
+              <option value="61">Nota de crédito</option>
+              <option value="56">Nota de débito</option>
+              <option value="52">Guía de despacho</option>
+              <option value="39">Boleta</option>
+            </optgroup>
+            <optgroup label="Honorarios">
+              <option value="BHE">Boleta de honorarios</option>
+            </optgroup>
+          </select>
+          <button class="clear-btn" id="clearFiltersBtn" type="button">Limpiar filtros</button>
+        </div>
+
+        <div class="bulk-bar" id="bulkBar" hidden></div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:34px;"><input type="checkbox" id="selectAll" aria-label="Seleccionar todos los pendientes visibles"></th>
+              <th>Documento</th>
+              <th>Proveedor</th>
+              <th>Fecha</th>
+              <th class="num">Total</th>
+              <th>Estado</th>
+              <th style="width:34px;"></th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="7"><div class="empty-state">Cargando documentos…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h2 id="modalTitle">Error al enviar a Finnegans</h2>
+    <div class="modal-meta" id="modalMeta"></div>
+    <div class="modal-error" id="modalError"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="modalCloseBtn" type="button">Cerrar</button>
+      <button class="btn btn-cta" id="modalRetryBtn" type="button">Reintentar envío</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  var API = ""; // mismo origen: el backend sirve este archivo
+
+  var TIPO_LABEL = {
+    "33":"Factura afecta", "34":"Factura exenta", "61":"Nota de crédito",
+    "56":"Nota de débito", "52":"Guía de despacho", "39":"Boleta", "BHE":"Boleta de honorarios"
+  };
+  var MESES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
+
+  function fmtCLP(n){
+    if(n === null || n === undefined) return "—";
+    return "$" + Math.round(n).toLocaleString("es-CL");
+  }
+  function fmtFecha(iso){
+    if(!iso) return "—";
+    var d = iso.slice(0,10).split("-");
+    return d[2] + " " + MESES[parseInt(d[1],10)-1] + " " + d[0];
+  }
+  function esc(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  var docs = [];
+  var selected = new Set();
+  var expanded = new Set();
+  var filters = { estado:"todos", tipo:"todos", q:"" };
+  var bulkConfirming = false;
+  var toastTimer = null;
+  var loading = true;
+
+  var tbody = document.getElementById("tbody");
+
+  // ---------- Backend ----------
+
+  function apiFetch(path, opts){
+    return fetch(API + path, opts).then(function(res){
+      return res.json().catch(function(){ return {}; }).then(function(data){
+        return { ok: res.ok, status: res.status, data: data };
+      });
+    });
+  }
+
+  function setConnStatus(state, text){
+    var tag = document.getElementById("connTag");
+    var label = document.getElementById("connTagText");
+    tag.className = "conn-tag " + state;
+    label.textContent = text;
+  }
+
+  function loadDocuments(){
+    loading = true;
+    renderAll();
+    return apiFetch("/api/documents").then(function(r){
+      if(!r.ok){
+        setConnStatus("error", "Backend respondió con error (" + r.status + ")");
+        docs = [];
+      } else {
+        docs = r.data || [];
+        setConnStatus("ok", "Conectado a tu backend local");
+      }
+    }).catch(function(){
+      setConnStatus("error", "No se pudo conectar con el backend. ¿Está corriendo \"uvicorn app.main:app --reload\"?");
+      docs = [];
+    }).then(function(){
+      loading = false;
+      renderAll();
+    });
+  }
+
+  // ---------- Render ----------
+
+  function getVisibleDocs(){
+    var q = filters.q.trim().toLowerCase();
+    return docs.filter(function(d){
+      if(filters.estado !== "todos" && d.estado !== filters.estado) return false;
+      if(filters.tipo !== "todos" && d.tipo !== filters.tipo) return false;
+      if(q){
+        var hay = (d.proveedor_nombre + " " + d.proveedor_rut + " " + d.folio).toLowerCase();
+        if(hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderKpis(){
+    var pending = docs.filter(function(d){ return d.estado === "pendiente"; });
+    var sent = docs.filter(function(d){ return d.estado === "enviado"; });
+    var errors = docs.filter(function(d){ return d.estado === "error"; });
+    var pendingSum = pending.reduce(function(s,d){ return s + d.total; }, 0);
+    var totalSum = docs.reduce(function(s,d){ return s + d.total; }, 0);
+
+    document.getElementById("kpiPendingCount").textContent = loading ? "–" : pending.length;
+    document.getElementById("kpiPendingSum").textContent = loading ? "–" : (fmtCLP(pendingSum) + " en total");
+    document.getElementById("kpiSentCount").textContent = loading ? "–" : sent.length;
+    document.getElementById("kpiErrorCount").textContent = loading ? "–" : errors.length;
+    document.getElementById("kpiTotalCount").textContent = loading ? "–" : docs.length;
+    document.getElementById("kpiTotalSum").textContent = loading ? "–" : fmtCLP(totalSum);
+  }
+
+  function itemsTableHtml(doc){
+    var items = doc.items || [];
+    var rows = items.map(function(it){
+      return "<tr><td>" + esc(it.desc) + "</td><td class=\"num mono\">" + it.cant +
+        "</td><td class=\"num mono\">" + fmtCLP(it.precio) + "</td><td class=\"num mono\">" + fmtCLP(it.subtotal) + "</td></tr>";
+    }).join("");
+    var totalsHtml = "";
+    if(doc.neto !== null && doc.neto !== undefined){
+      totalsHtml =
+        "<div class=\"totals-line\"><span class=\"muted\">Neto</span><b>" + fmtCLP(doc.neto) + "</b></div>" +
+        "<div class=\"totals-line\"><span class=\"muted\">IVA</span><b>" + fmtCLP(doc.iva) + "</b></div>" +
+        "<div class=\"totals-line\"><span class=\"muted\">Total</span><b>" + fmtCLP(doc.total) + "</b></div>";
+    } else {
+      totalsHtml = "<div class=\"totals-line\"><span class=\"muted\">Monto referencial</span><b>" + fmtCLP(doc.total) + "</b></div>";
+    }
+    var noteHtml = "";
+    if(doc.motivo){
+      noteHtml = "<div class=\"detail-note\">" + esc(doc.motivo) + "</div>";
+    } else if(doc.tipo === "52"){
+      noteHtml = "<div class=\"detail-note\">Guía de despacho: documento de traslado, no genera obligación de IVA por sí sola.</div>";
+    }
+    var itemsHtml = items.length
+      ? "<table class=\"items-table\"><thead><tr><th>Descripción</th><th class=\"num\">Cant.</th><th class=\"num\">Precio unit.</th><th class=\"num\">Subtotal</th></tr></thead><tbody>" + rows + "</tbody></table>" + totalsHtml
+      : "<div class=\"detail-note\">Este documento no tiene detalle de ítems cargado todavía.</div>" + totalsHtml;
+    var xmlHtml = doc.xml_original
+      ? "<details><summary class=\"link-btn xml-toggle\">Ver XML original</summary><div class=\"xml-box\">" + esc(doc.xml_original) + "</div></details>"
+      : "";
+    return noteHtml + itemsHtml + xmlHtml;
+  }
+
+  function bheDetailHtml(doc){
+    var retPct = doc.retencion_pct;
+    return (doc.servicio ? "<div class=\"detail-note\">" + esc(doc.servicio) + "</div>" : "") +
+      "<dl class=\"bhe-grid\">" +
+      "<div class=\"bhe-field\"><dt>Monto bruto</dt><dd>" + fmtCLP(doc.bruto) + "</dd></div>" +
+      "<div class=\"bhe-field\"><dt>Retención" + (retPct != null ? " (" + String(retPct).replace(".",",") + "%)" : "") + "</dt><dd>" + fmtCLP(doc.retencion) + "</dd></div>" +
+      "<div class=\"bhe-field\"><dt>Líquido a pagar</dt><dd>" + fmtCLP(doc.liquido) + "</dd></div>" +
+      "</dl>";
+  }
+
+  function estadoCellHtml(doc){
+    if(doc.estado === "enviando"){
+      return "<div class=\"estado-cell\"><span class=\"pill pending\"><span class=\"spinner\"></span> Enviando…</span></div>";
+    }
+    if(doc.estado === "enviado"){
+      return "<div class=\"estado-cell\"><span class=\"pill sent\">Enviado</span><span class=\"muted small\">" + fmtFecha(doc.fecha_envio) + "</span></div>";
+    }
+    if(doc.estado === "error"){
+      return "<div class=\"estado-cell\"><span class=\"pill error\">Error</span>" +
+        "<button class=\"link-btn\" data-action=\"view-error\" data-id=\"" + doc.id + "\">Ver detalle</button></div>";
+    }
+    return "<div class=\"estado-cell\"><span class=\"pill pending\">Pendiente</span>" +
+      "<button class=\"link-btn\" data-action=\"send-one\" data-id=\"" + doc.id + "\">Enviar</button></div>";
+  }
+
+  function renderTable(){
+    if(loading){
+      tbody.innerHTML = "<tr><td colspan=\"7\"><div class=\"empty-state\">Cargando documentos…</div></td></tr>";
+      renderBulkBar();
+      return;
+    }
+
+    var visible = getVisibleDocs();
+
+    if(visible.length === 0){
+      var msg = docs.length === 0
+        ? "No hay documentos en la bandeja todavía. Usá \"Sincronizar con SII\" para traer los pendientes."
+        : "No hay documentos que coincidan con los filtros actuales.";
+      tbody.innerHTML = "<tr><td colspan=\"7\"><div class=\"empty-state\">" + msg + "</div></td></tr>";
+      renderBulkBar();
+      return;
+    }
+
+    var html = visible.map(function(doc){
+      var isExpanded = expanded.has(doc.id);
+      var isSelected = selected.has(doc.id);
+      var checkboxCell = doc.estado === "pendiente"
+        ? "<input type=\"checkbox\" data-action=\"select\" data-id=\"" + doc.id + "\" " + (isSelected ? "checked" : "") + " aria-label=\"Seleccionar documento\">"
+        : (doc.estado === "enviado" ? "<span class=\"muted\" title=\"Ya enviado\">✓</span>" : "<span class=\"muted\">–</span>");
+
+      var mainRow = "<tr class=\"doc-row" + (isSelected ? " selected" : "") + "\" data-row=\"" + doc.id + "\">" +
+        "<td>" + checkboxCell + "</td>" +
+        "<td><span class=\"doc-type\">" + (TIPO_LABEL[doc.tipo] || doc.tipo) + "</span><div class=\"mono muted small\">Folio " + doc.folio + "</div></td>" +
+        "<td><div class=\"provider-name\">" + esc(doc.proveedor_nombre) + "</div><div class=\"mono muted small\">" + esc(doc.proveedor_rut) + "</div></td>" +
+        "<td class=\"muted\">" + fmtFecha(doc.fecha) + "</td>" +
+        "<td class=\"num mono\">" + fmtCLP(doc.total) + "</td>" +
+        "<td>" + estadoCellHtml(doc) + "</td>" +
+        "<td><button class=\"chevron-btn\" data-action=\"toggle\" data-id=\"" + doc.id + "\" aria-expanded=\"" + (isExpanded ? "true" : "false") + "\" aria-label=\"Ver detalle\">⌄</button></td>" +
+        "</tr>";
+
+      var detailBody = doc.tipo === "BHE" ? bheDetailHtml(doc) : itemsTableHtml(doc);
+      var detailRow = "<tr class=\"detail-row\" " + (isExpanded ? "" : "hidden") + " data-detail=\"" + doc.id + "\">" +
+        "<td colspan=\"7\"><div class=\"detail-panel\">" + detailBody + "</div></td></tr>";
+
+      return mainRow + detailRow;
+    }).join("");
+
+    tbody.innerHTML = html;
+    renderBulkBar();
+  }
+
+  function renderBulkBar(){
+    var bar = document.getElementById("bulkBar");
+    var n = selected.size;
+    if(n === 0){
+      bar.hidden = true;
+      bar.innerHTML = "";
+      return;
+    }
+    bar.hidden = false;
+    var sum = docs.filter(function(d){ return selected.has(d.id); }).reduce(function(s,d){ return s + d.total; }, 0);
+
+    if(!bulkConfirming){
+      bar.innerHTML =
+        "<div><strong>" + n + "</strong> documento" + (n === 1 ? "" : "s") + " seleccionado" + (n === 1 ? "" : "s") +
+        " <span class=\"muted\">· " + fmtCLP(sum) + "</span></div>" +
+        "<div class=\"bulk-actions\">" +
+        "<button class=\"btn btn-ghost\" data-action=\"clear-selection\" type=\"button\">Cancelar selección</button>" +
+        "<button class=\"btn btn-cta\" data-action=\"bulk-send\" type=\"button\">Enviar a Finnegans</button>" +
+        "</div>";
+    } else {
+      bar.innerHTML =
+        "<div>¿Confirmar envío de <strong>" + n + "</strong> documento" + (n === 1 ? "" : "s") + " por <strong>" + fmtCLP(sum) + "</strong>?</div>" +
+        "<div class=\"bulk-actions\">" +
+        "<button class=\"btn btn-ghost\" data-action=\"bulk-cancel\" type=\"button\">Volver</button>" +
+        "<button class=\"btn btn-cta\" data-action=\"bulk-confirm\" type=\"button\">Confirmar envío</button>" +
+        "</div>";
+    }
+  }
+
+  function updateTabsUI(){
+    document.querySelectorAll(".tab-btn").forEach(function(btn){
+      btn.classList.toggle("active", btn.getAttribute("data-estado") === filters.estado);
+    });
+  }
+
+  function renderAll(){
+    renderKpis();
+    renderTable();
+    updateTabsUI();
+  }
+
+  function showToast(msg, isError){
+    var t = document.getElementById("toast");
+    t.textContent = msg;
+    t.classList.toggle("err", !!isError);
+    t.classList.add("show");
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ t.classList.remove("show"); }, isError ? 5200 : 3200);
+  }
+
+  // ---------- Acciones ----------
+
+  function handleSync(){
+    var btn = document.getElementById("syncBtn");
+    var label = document.getElementById("syncLabel");
+    var icon = document.getElementById("syncIcon");
+    btn.disabled = true;
+    icon.innerHTML = "<span class=\"spinner\"></span>";
+    label.textContent = "Sincronizando con SII…";
+
+    apiFetch("/api/sync", { method: "POST" }).then(function(r){
+      if(r.ok){
+        document.getElementById("syncMeta").textContent = "Última sincronización: hace instantes";
+        showToast(r.data.mensaje || ("Sincronización completa: " + (r.data.documentos_nuevos || 0) + " nuevos"));
+        return loadDocuments();
+      } else {
+        document.getElementById("syncMeta").textContent = "Última sincronización: falló (ver aviso)";
+        showToast("No se pudo sincronizar: " + (r.data.detail || ("error " + r.status)), true);
+      }
+    }).catch(function(){
+      showToast("No se pudo conectar con el backend local. ¿Está corriendo \"uvicorn app.main:app --reload\"?", true);
+    }).then(function(){
+      btn.disabled = false;
+      icon.textContent = "↻";
+      label.textContent = "Sincronizar con SII";
+    });
+  }
+
+  function sendOne(id){
+    var doc = docs.find(function(d){ return d.id === id; });
+    if(!doc) return Promise.resolve();
+    doc.estado = "enviando";
+    renderAll();
+    return apiFetch("/api/documents/" + id + "/send", { method: "POST" }).then(function(r){
+      if(r.ok && r.data.estado === "enviado"){
+        showToast("Documento enviado a Finnegans");
+        return loadDocuments();
+      } else if(r.ok){
+        // el backend proceso el envio pero quedo en error (p.ej. Finnegans lo rechazo)
+        return loadDocuments().then(function(){
+          showToast("Finnegans rechazó el documento — ver detalle en la fila.", true);
+        });
+      } else {
+        return loadDocuments().then(function(){
+          showToast("No se pudo enviar: " + (r.data.detail || ("error " + r.status)), true);
+        });
+      }
+    }).catch(function(){
+      return loadDocuments().then(function(){
+        showToast("No se pudo conectar con el backend local.", true);
+      });
+    });
+  }
+
+  function handleBulkConfirm(){
+    var ids = Array.from(selected);
+    bulkConfirming = false;
+    ids.forEach(function(id){
+      var doc = docs.find(function(d){ return d.id === id; });
+      if(doc) doc.estado = "enviando";
+    });
+    renderAll();
+
+    var okCount = 0, failCount = 0, lastErr = null;
+
+    function sendNext(i){
+      if(i >= ids.length){
+        selected.clear();
+        return loadDocuments().then(function(){
+          if(failCount === 0){
+            showToast(okCount + " documento" + (okCount === 1 ? "" : "s") + " enviado" + (okCount === 1 ? "" : "s") + " a Finnegans");
+          } else {
+            showToast(okCount + " enviado(s), " + failCount + " con error" + (lastErr ? (": " + lastErr) : ""), true);
+          }
+        });
+      }
+      return apiFetch("/api/documents/" + ids[i] + "/send", { method: "POST" }).then(function(r){
+        if(r.ok && r.data.estado === "enviado"){ okCount++; }
+        else { failCount++; lastErr = (r.data && r.data.detail) || ("error " + r.status); }
+      }).catch(function(){
+        failCount++; lastErr = "no se pudo conectar con el backend";
+      }).then(function(){
+        return sendNext(i + 1);
+      });
+    }
+
+    return sendNext(0);
+  }
+
+  function openErrorModal(id){
+    var doc = docs.find(function(d){ return d.id === id; });
+    if(!doc) return;
+    document.getElementById("modalMeta").innerHTML =
+      (TIPO_LABEL[doc.tipo] || doc.tipo) + " · Folio " + doc.folio + "<br>" + esc(doc.proveedor_nombre) + " · " + esc(doc.proveedor_rut);
+    document.getElementById("modalError").textContent = doc.error_detalle || "Error no especificado.";
+    document.getElementById("modalRetryBtn").setAttribute("data-id", id);
+    document.getElementById("modalOverlay").hidden = false;
+  }
+  function closeErrorModal(){
+    document.getElementById("modalOverlay").hidden = true;
+  }
+
+  // ---------- Eventos ----------
+
+  tbody.addEventListener("click", function(e){
+    var btn = e.target.closest("[data-action]");
+    if(!btn) return;
+    var action = btn.getAttribute("data-action");
+    var id = parseInt(btn.getAttribute("data-id"), 10);
+
+    if(action === "toggle"){
+      if(expanded.has(id)) expanded.delete(id); else expanded.add(id);
+      renderTable();
+    } else if(action === "send-one"){
+      sendOne(id);
+    } else if(action === "view-error"){
+      openErrorModal(id);
+    }
+  });
+  tbody.addEventListener("change", function(e){
+    var el = e.target;
+    if(el.matches("[data-action=\"select\"]")){
+      var id = parseInt(el.getAttribute("data-id"), 10);
+      if(el.checked) selected.add(id); else selected.delete(id);
+      renderTable();
+    }
+  });
+
+  document.getElementById("selectAll").addEventListener("change", function(e){
+    var visiblePending = getVisibleDocs().filter(function(d){ return d.estado === "pendiente"; });
+    if(e.target.checked){
+      visiblePending.forEach(function(d){ selected.add(d.id); });
+    } else {
+      visiblePending.forEach(function(d){ selected.delete(d.id); });
+    }
+    renderTable();
+  });
+
+  document.getElementById("bulkBar").addEventListener("click", function(e){
+    var btn = e.target.closest("[data-action]");
+    if(!btn) return;
+    var action = btn.getAttribute("data-action");
+    if(action === "clear-selection"){
+      selected.clear(); bulkConfirming = false; renderTable();
+    } else if(action === "bulk-send"){
+      bulkConfirming = true; renderBulkBar();
+    } else if(action === "bulk-cancel"){
+      bulkConfirming = false; renderBulkBar();
+    } else if(action === "bulk-confirm"){
+      handleBulkConfirm();
+    }
+  });
+
+  document.getElementById("estadoTabs").addEventListener("click", function(e){
+    var btn = e.target.closest(".tab-btn");
+    if(!btn) return;
+    filters.estado = btn.getAttribute("data-estado");
+    updateTabsUI();
+    renderTable();
+  });
+
+  document.getElementById("syncBtn").addEventListener("click", handleSync);
+  document.getElementById("searchInput").addEventListener("input", function(e){
+    filters.q = e.target.value; renderTable();
+  });
+  document.getElementById("tipoFilter").addEventListener("change", function(e){
+    filters.tipo = e.target.value; renderTable();
+  });
+  document.getElementById("clearFiltersBtn").addEventListener("click", function(){
+    filters = { estado:"todos", tipo:"todos", q:"" };
+    document.getElementById("searchInput").value = "";
+    document.getElementById("tipoFilter").value = "todos";
+    updateTabsUI();
+    renderTable();
+  });
+
+  document.getElementById("modalCloseBtn").addEventListener("click", closeErrorModal);
+  document.getElementById("modalOverlay").addEventListener("click", function(e){
+    if(e.target.id === "modalOverlay") closeErrorModal();
+  });
+  document.getElementById("modalRetryBtn").addEventListener("click", function(e){
+    var id = parseInt(e.target.getAttribute("data-id"), 10);
+    closeErrorModal();
+    sendOne(id);
+  });
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && !document.getElementById("modalOverlay").hidden) closeErrorModal();
+  });
+
+  renderAll();
+  loadDocuments();
+})();
+</script>
+
+</body>
+</html>

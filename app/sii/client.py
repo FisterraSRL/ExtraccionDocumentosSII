@@ -162,19 +162,26 @@ class SIIClient:
 
     # ---------- Camino confirmado: navegador real con el certificado instalado ----------
 
-    def login_with_browser(self, nss_home: Path | str, headless: bool = True):
+    def login_with_browser(self, nss_home: Path | str | None = None, headless: bool = True):
         """Loguea al SII con un Chromium real (Playwright), usando el certificado
-        importado a una base de certificados NSS.
+        digital ya instalado en el sistema operativo donde corre este código.
 
-        Mecánica confirmada y funcional (probada en el sandbox de Claude, ver docstring
-        del módulo para la limitación de red que impidió confirmar el resultado final
-        del login desde ahí — este método debe probarse en un entorno sin proxy
-        interceptor, por ejemplo la máquina de un desarrollador o el servidor final):
+        Mecánica confirmada (el login manual del usuario en su propio Chrome de
+        Windows funcionó; ver docstring del módulo para el detalle de por qué el
+        sandbox de Claude en la nube no puede completar este mismo paso — no es un
+        problema de este código, es el proxy interceptor del sandbox):
 
-        1. `nss_home` debe ser un directorio con `.pki/nssdb` conteniendo el certificado
-           ya importado (ver README del proyecto o `scripts/setup_nss_cert.sh` — pendiente
-           de crear ese script de conveniencia) y, si aplica, la CA de cualquier proxy
-           corporativo que el entorno real use.
+        1. Chrome/Chromium tiene que encontrar el certificado del cliente en el
+           almacén de certificados del sistema operativo:
+           - **Windows** (caso de uso actual): usa el almacén nativo de Windows
+             (CryptoAPI/CNG) automáticamente. Si el .pfx ya fue importado ahí (Panel
+             de control → Administrar certificados de usuario, o simplemente al
+             haberlo usado antes en el navegador), no hace falta ningún paso extra:
+             se puede dejar `nss_home=None`.
+           - **Linux**: Chrome/Chromium lee la base NSS en `~/.pki/nssdb`. Para ese
+             caso hay que pasar `nss_home` apuntando a un directorio con el
+             certificado ya importado ahí (con `certutil`/`pk12util`), y este método
+             lo usa como el `HOME` del proceso del navegador.
         2. Se lanza Chromium con `--auto-select-certificate-for-urls` apuntando a
            `https://[*.]sii.cl`, para que no dependa de un diálogo humano de selección
            de certificado.
@@ -186,16 +193,24 @@ class SIIClient:
         página, tal como se hizo en las pruebas), para poder seguir navegando el RCV/BHE
         desde el mismo contexto de navegador.
         """
+        import os
+
         from playwright.sync_api import sync_playwright  # import diferido: dependencia pesada
 
         auto_select = json.dumps([{"pattern": "https://[*.]sii.cl", "filter": {}}])
 
+        launch_kwargs: dict = {
+            "headless": headless,
+            "args": [f"--auto-select-certificate-for-urls={auto_select}"],
+        }
+        if nss_home is not None:
+            # Importante: mezclar con el entorno actual, nunca reemplazarlo entero,
+            # o se pierden variables como HTTPS_PROXY/PATH y el navegador deja de
+            # poder salir a internet.
+            launch_kwargs["env"] = {**os.environ, "HOME": str(nss_home)}
+
         playwright = sync_playwright().start()
-        browser = playwright.chromium.launch(
-            headless=headless,
-            args=[f"--auto-select-certificate-for-urls={auto_select}"],
-            env={"HOME": str(nss_home)},
-        )
+        browser = playwright.chromium.launch(**launch_kwargs)
         context = browser.new_context()
         page = context.new_page()
         page.goto("https://misiir.sii.cl/cgi_misii/siihome.cgi", wait_until="networkidle", timeout=30000)
