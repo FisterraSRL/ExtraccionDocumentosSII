@@ -381,6 +381,34 @@ automáticas en `http://localhost:8000/docs`.
    proxy interceptor) y un gestor de secretos real para el certificado/credenciales.
 7. Definir usuarios/roles con acceso al portal.
 
+## Versión del portal y cuándo subirla
+
+La versión se muestra en el encabezado del portal y vive en **`app/version.py`**, que es
+la única fuente de verdad: de ahí la toman FastAPI (`/openapi.json`), el endpoint
+`GET /api/version` y el encabezado del portal, que la pide al cargar. No escribirla a
+mano en el HTML.
+
+**La numeración no es semver.** Es un contador de tres dígitos que avanza de a uno y
+arrastra al llegar a 10, por pedido del dueño del proyecto:
+
+```
+1.0.0 → 1.0.1 → … → 1.0.9 → 1.1.0 → … → 1.9.9 → 2.0.0
+```
+
+O sea que después de `1.0.9` viene `1.1.0`, **no** `1.0.10`. Es el error fácil de
+cometer, así que existe `scripts/subir_version.py`, que aplica el arrastre solo.
+
+**Cuándo se incrementa: una vez por cada publicación a GitHub.** No por cada cambio ni
+por cada commit. La secuencia al publicar es:
+
+```bash
+python scripts/subir_version.py   # 1.0.0 → 1.0.1
+git add -A && git commit && git push
+```
+
+Si se llega a `9.9.9` el script falla a propósito en vez de inventar un formato nuevo:
+hay que decidir con el dueño del proyecto cómo seguir.
+
 ## Estado del repositorio Git
 
 Remoto: `https://github.com/FisterraSRL/ExtraccionDocumentosSII.git` — al 16-sep-2026

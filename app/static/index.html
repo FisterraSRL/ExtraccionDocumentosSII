@@ -101,6 +101,10 @@
   }
 
   /* ---------- KPI ---------- */
+  .app-version{
+    font-size:.72rem; font-weight:600; letter-spacing:.06em; color:var(--fs-steel-deep);
+    margin-left:10px; align-self:center;
+  }
   .empresa-paso{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .paso-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
     border-radius:50%;background:#0A2F43;color:#fff;font-size:.74rem;font-weight:700;flex:none;}
@@ -303,6 +307,7 @@
 <div class="wrap">
   <div class="header-row">
     <span class="section-pill">Documentos SII</span>
+    <span class="app-version" id="appVersion" title="Versión del portal"></span>
     <svg class="lockup" viewBox="0 0 520 100" role="img" aria-label="Fisterra">
       <title>Fisterra</title>
       <g transform="translate(0,4) scale(0.92)">
@@ -502,6 +507,14 @@
     var btn = document.getElementById("syncBtn");
     btn.disabled = !empresaActual;
     btn.title = empresaActual ? "" : "Elegí una empresa primero";
+  }
+
+  function loadVersion(){
+    return apiFetch("/api/version").then(function(r){
+      if(r.ok && r.data && r.data.version){
+        document.getElementById("appVersion").textContent = "v" + r.data.version;
+      }
+    }).catch(function(){ /* sin versión visible no se rompe nada */ });
   }
 
   function loadEmpresas(){
@@ -966,6 +979,7 @@
   });
 
   renderAll();
+  loadVersion();
   loadEmpresas().then(limpiarTableros);
 })();
 </script>

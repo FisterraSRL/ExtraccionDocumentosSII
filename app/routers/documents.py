@@ -25,6 +25,7 @@ from app.models import (
     EstadoDocumento,
     SyncResult,
 )
+from app.version import __version__
 from app.sii.client import (
     SIIAuthenticationError,
     SIIBloqueadoError,
@@ -61,6 +62,16 @@ def listar_documentos(
             | (Documento.proveedor_rut.ilike(like))
         )
     return db.execute(stmt.order_by(Documento.fecha.desc())).scalars().all()
+
+
+@router.get("/version")
+def version():
+    """Versión del portal, para mostrarla en el encabezado.
+
+    Se sirve desde acá en vez de escribirla en el HTML para que haya una sola fuente
+    de verdad (app/version.py) y no se desincronicen.
+    """
+    return {"version": __version__}
 
 
 @router.get("/empresas", response_model=list[EmpresaOut])

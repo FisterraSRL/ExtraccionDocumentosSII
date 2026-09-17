@@ -5,9 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.db import init_db
+from app.version import __version__
 from app.routers import documents
 
-app = FastAPI(title="SII → Finnegans", version="0.1.0")
+app = FastAPI(title="SII → Finnegans", version=__version__)
 
 # Abierto en desarrollo; restringir a los orígenes reales del portal antes de producción.
 # Nota: como el portal ahora se sirve desde esta misma app (ver más abajo), en la práctica
