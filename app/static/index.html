@@ -101,6 +101,25 @@
   }
 
   /* ---------- KPI ---------- */
+  .login-overlay{
+    position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+    padding:20px; background:var(--fs-gradient-surface,#D7D8DD);
+  }
+  .login-card{
+    width:min(420px,100%); display:flex; flex-direction:column; gap:10px;
+    background:var(--fs-white,#fff); padding:30px 28px; border-radius:20px;
+    border:1px solid rgba(10,47,67,.10); box-shadow:0 18px 40px rgba(10,47,67,.14);
+  }
+  .login-card .titular{margin-bottom:4px;}
+  .login-texto{margin:0 0 10px; color:var(--fs-steel-deep); font-size:.88rem;}
+  .login-card label{font-size:.74rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:.05em; color:#0A2F43;}
+  .login-card input{padding:10px 12px; border-radius:10px; font:inherit;
+    border:1px solid rgba(10,47,67,.22); color:#0A2F43; background:#fff;}
+  .login-card .btn{margin-top:12px; justify-content:center;}
+  .login-error{padding:9px 12px; border-radius:9px; font-size:.84rem;
+    background:#fdecec; border:1px solid #e9b4b4; color:#9C3032;}
+  .cerrar-sesion{margin-left:auto; align-self:center;}
   .app-version{
     font-size:.72rem; font-weight:600; letter-spacing:.06em; color:var(--fs-steel-deep);
     margin-left:10px; align-self:center;
@@ -241,6 +260,13 @@
   /* ---------- Detail panel ---------- */
   tr.detail-row td{background:rgba(255,255,255,.35); padding:0; border-bottom:1px solid rgba(163,171,182,.4);}
   .detail-panel{padding:16px 20px 20px 46px; display:flex; flex-direction:column; gap:12px;}
+  .pdf-acciones{display:flex; gap:14px; align-items:center; margin-top:12px; flex-wrap:wrap;}
+  .pdf-visor{margin-top:10px; border:1px solid rgba(10,47,67,.16); border-radius:12px; overflow:hidden;}
+  .pdf-cargando{padding:26px; text-align:center; color:var(--fs-steel-deep); font-size:.88rem;}
+  .pdf-visor iframe{display:block; width:100%; height:min(78vh,780px); border:0; background:#fff;}
+  .item-nota{font-size:.7rem; color:var(--fs-steel-deep); margin-top:2px;}
+  .item-alerta{font-size:.7rem; color:#7a5209; margin-top:2px; font-weight:600;}
+  .item-descuadre{background:#fdf7ec;}
   .detail-warn{margin-top:10px;padding:9px 12px;border-radius:9px;font-size:.84rem;
     background:#fdf3e3;border:1px solid #e8c98a;color:#7a5209;}
   .detail-note{
@@ -267,11 +293,14 @@
   /* ---------- Modal ---------- */
   .modal-overlay{
     position:fixed; inset:0; background:rgba(10,47,67,.55); display:flex; align-items:center; justify-content:center;
-    padding:20px; z-index:50;
+    padding:20px; z-index:50; overflow:auto;
   }
   .modal{
     background:var(--fs-surface-high); border:var(--fs-hairline); border-radius:var(--fs-radius-panel); max-width:460px; width:100%;
     padding:24px; display:flex; flex-direction:column; gap:14px; box-shadow:var(--fs-shadow-panel);
+    /* margin:auto y no solo align-items:center: centrado con flex, un modal más alto que
+       la ventana se recorta por arriba y deja los botones fuera de alcance. */
+    margin:auto; max-height:calc(100vh - 40px); overflow:auto;
   }
   .modal h2{margin:0; font-size:1.1rem; font-weight:700; color:var(--fs-ink);}
   .modal-error{
@@ -280,6 +309,24 @@
   }
   .modal-meta{font-size:.83rem; color:var(--fs-steel-deep); display:flex; flex-direction:column; gap:2px; font-weight:600;}
   .modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:4px;}
+  .modal-aviso{
+    background:rgba(214,158,46,.12); border:1px solid rgba(214,158,46,.45); border-radius:10px;
+    padding:11px 13px; font-size:.84rem; line-height:1.45; color:var(--fs-ink);
+  }
+  .modal-lista{
+    max-height:190px; overflow:auto; border:var(--fs-hairline); border-radius:10px;
+    font-size:.82rem; background:rgba(255,255,255,.55);
+  }
+  .modal-lista div{padding:7px 11px; border-bottom:1px solid rgba(163,171,182,.35);}
+  .modal-lista div:last-child{border-bottom:none;}
+  .modal-json{
+    max-height:260px; overflow:auto; margin:0; padding:11px 13px; border-radius:10px;
+    background:var(--fs-gradient-navy-solid); color:#e8eef5; font-size:.74rem; line-height:1.5;
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre;
+  }
+  .modal summary{cursor:pointer; font-size:.83rem; font-weight:600; color:var(--fs-steel-deep);}
+  .modal summary:hover{color:var(--fs-ink);}
+  .modal-nota{margin:8px 0 6px; font-size:.78rem; color:var(--fs-steel-deep);}
 
   /* ---------- Toast ---------- */
   .toast{
@@ -304,10 +351,27 @@
 </head>
 <body>
 
+<div class="login-overlay" id="loginOverlay" hidden>
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <div class="titular">
+      <span class="l1">BANDEJA</span>
+      <span class="l2">de documentos recibidos</span>
+    </div>
+    <p class="login-texto">Este portal muestra documentos tributarios. Ingresá para continuar.</p>
+    <label for="loginUsuario">Usuario</label>
+    <input type="text" id="loginUsuario" name="username" autocomplete="username" required>
+    <label for="loginPassword">Contraseña</label>
+    <input type="password" id="loginPassword" name="password" autocomplete="current-password" required>
+    <div class="login-error" id="loginError" hidden></div>
+    <button class="btn btn-cta" type="submit" id="loginBtn">Ingresar</button>
+  </form>
+</div>
+
 <div class="wrap">
   <div class="header-row">
     <span class="section-pill">Documentos SII</span>
     <span class="app-version" id="appVersion" title="Versión del portal"></span>
+    <button class="link-btn cerrar-sesion" id="logoutBtn" type="button" hidden>Salir</button>
     <svg class="lockup" viewBox="0 0 520 100" role="img" aria-label="Fisterra">
       <title>Fisterra</title>
       <g transform="translate(0,4) scale(0.92)">
@@ -397,7 +461,7 @@
         <table>
           <thead>
             <tr>
-              <th style="width:34px;"><input type="checkbox" id="selectAll" aria-label="Seleccionar todos los pendientes visibles"></th>
+              <th style="width:34px;"><input type="checkbox" id="selectAll" aria-label="Seleccionar todos los enviables visibles"></th>
               <th>Documento</th>
               <th>Proveedor</th>
               <th>Fecha</th>
@@ -414,8 +478,7 @@
 
       <div class="envio-pie" id="envioPie">
         <div class="envio-resumen" id="envioResumen"></div>
-        <button class="btn btn-cta" id="enviarTodoBtn" type="button" disabled
-                title="Todavía no está implementado el envío a Finnegans">
+        <button class="btn btn-cta" id="enviarTodoBtn" type="button" disabled>
           Enviar a Finnegans
         </button>
       </div>
@@ -428,8 +491,30 @@
     <h2 id="modalTitle">Error al enviar a Finnegans</h2>
     <div class="modal-meta" id="modalMeta"></div>
     <div class="modal-error" id="modalError"></div>
+    <details id="errorJsonBox">
+      <summary>Ver el JSON del documento</summary>
+      <p class="modal-nota">Es lo que se le mandaría a Finnegans ahora, con la configuración actual.</p>
+      <pre class="modal-json" id="errorJson"></pre>
+    </details>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="modalCloseBtn" type="button">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="confirmOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <h2 id="confirmTitle">Enviar a Finnegans</h2>
+    <div class="modal-meta" id="confirmMeta"></div>
+    <div class="modal-aviso" id="confirmAviso"></div>
+    <div class="modal-lista" id="confirmLista"></div>
+    <details id="confirmJsonBox">
+      <summary>Ver el JSON del primer documento</summary>
+      <pre class="modal-json" id="confirmJson">Cargando…</pre>
+    </details>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="confirmCancelBtn" type="button">Cancelar</button>
+      <button class="btn btn-cta" id="confirmOkBtn" type="button">Enviar</button>
     </div>
   </div>
 </div>
@@ -470,6 +555,9 @@
   var sincronizado = false;
   var toastTimer = null;
   var loading = true;
+  // Hay un envio en curso: el boton queda bloqueado para no mandar la misma seleccion
+  // dos veces y duplicar comprobantes en el ERP.
+  var enviando = false;
 
   var tbody = document.getElementById("tbody");
 
@@ -477,6 +565,11 @@
 
   function apiFetch(path, opts){
     return fetch(API + path, opts).then(function(res){
+      // 401 = la cookie venció o no hay sesión. Se vuelve al login en vez de mostrar
+      // "no se pudo cargar" y dejar al usuario sin saber qué pasó.
+      if(res.status === 401 && path.indexOf("/api/sesion") !== 0){
+        mostrarLogin(true);
+      }
       return res.json().catch(function(){ return {}; }).then(function(data){
         return { ok: res.ok, status: res.status, data: data };
       });
@@ -507,6 +600,39 @@
     var btn = document.getElementById("syncBtn");
     btn.disabled = !empresaActual;
     btn.title = empresaActual ? "" : "Elegí una empresa primero";
+  }
+
+  function mostrarLogin(mostrar){
+    document.getElementById("loginOverlay").hidden = !mostrar;
+    document.getElementById("logoutBtn").hidden = mostrar;
+    if(mostrar) document.getElementById("loginUsuario").focus();
+  }
+
+  function comprobarSesion(){
+    return apiFetch("/api/sesion").then(function(r){
+      if(!r.ok) return false;
+      if(!r.data.configurada){
+        // Sin credenciales configuradas no hay a quién validar. Se avisa en vez de
+        // dejar la bandeja abierta o de mostrar un login que nunca aceptaría a nadie.
+        mostrarLogin(true);
+        var err = document.getElementById("loginError");
+        err.hidden = false;
+        err.textContent = "El portal no tiene credenciales configuradas. Definí " +
+          "PORTAL_USUARIO, PORTAL_PASSWORD y SECRET_KEY en el servidor.";
+        document.getElementById("loginBtn").disabled = true;
+        return false;
+      }
+      return !!r.data.autenticado;
+    }).catch(function(){ return false; });
+  }
+
+  function arrancar(){
+    return comprobarSesion().then(function(hay){
+      if(!hay){ mostrarLogin(true); return; }
+      mostrarLogin(false);
+      loadVersion();
+      return loadEmpresas().then(limpiarTableros);
+    });
   }
 
   function loadVersion(){
@@ -654,16 +780,46 @@
       etiqueta + "</div>";
   }
 
+  function pdfHtml(doc){
+    // El PDF es la representación impresa que genera el SII: es la prueba de respaldo
+    // del documento, así que conviene poder abrirlo sin salir del portal.
+    if(!doc.pdf_disponible) return "";
+    var url = "/api/documents/" + doc.id + "/pdf";
+    // Si no está guardado, la primera apertura va al SII y tarda unos segundos. Se avisa
+    // en vez de dejar al usuario mirando un visor en blanco sin saber si se colgó.
+    var aviso = doc.tiene_pdf ? "" :
+      "<span class=\"muted small\">se trae del SII al abrirlo</span>";
+    return "<div class=\"pdf-acciones\">" +
+      "<button class=\"link-btn\" data-action=\"ver-pdf\" data-id=\"" + doc.id + "\">Ver documento (PDF)</button>" +
+      "<a class=\"link-btn\" href=\"" + url + "\" target=\"_blank\" rel=\"noopener\">Abrir en otra pestaña</a>" +
+      aviso +
+      "</div><div class=\"pdf-visor\" id=\"pdfVisor-" + doc.id + "\" hidden></div>";
+  }
+
   function itemsTableHtml(doc){
     var items = doc.items || [];
     var rows = items.map(function(it){
-      // cant/precio pueden venir nulos: hay PDF del SII que no imprimen esas columnas.
       var cant = (it.cant === null || it.cant === undefined)
         ? "—" : String(it.cant).replace(".", ",");
       var desc = esc(it.desc || "");
       if(it.codigo) desc += "<div class=\"mono muted small\">" + esc(it.codigo) + "</div>";
-      return "<tr><td>" + desc + "</td><td class=\"num mono\">" + cant +
-        "</td><td class=\"num mono\">" + fmtCLP(it.precio) + "</td><td class=\"num mono\">" + fmtCLP(it.subtotal) + "</td></tr>";
+      // Se distingue lo leído del PDF de lo deducido del subtotal, y se marca cuando
+      // cantidad x precio no da el subtotal: es el control que pidió el usuario.
+      if(it.derivado){
+        desc += "<div class=\"item-nota\">" + esc(it.derivado) + " deducido del subtotal</div>";
+      }
+      if(it.cuadra === false){
+        var esperado = (it.cant || 0) * (it.precio || 0);
+        desc += "<div class=\"item-alerta\">cantidad × precio = " + fmtCLP(esperado) +
+          ", no coincide con el subtotal</div>";
+      }
+      var descPct = it.descuento_pct
+        ? "<div class=\"mono muted small\">-" + String(it.descuento_pct).replace(".", ",") + "%</div>"
+        : "";
+      return "<tr" + (it.cuadra === false ? " class=\"item-descuadre\"" : "") + "><td>" + desc +
+        "</td><td class=\"num mono\">" + cant +
+        "</td><td class=\"num mono\">" + fmtCLP(it.precio) + descPct +
+        "</td><td class=\"num mono\">" + fmtCLP(it.subtotal) + "</td></tr>";
     }).join("");
     var totalsHtml = "";
     if(doc.neto !== null && doc.neto !== undefined){
@@ -689,10 +845,7 @@
     if(doc.items_observacion){
       itemsHtml += "<div class=\"detail-warn\">" + esc(doc.items_observacion) + "</div>";
     }
-    var xmlHtml = doc.xml_original
-      ? "<details><summary class=\"link-btn xml-toggle\">Ver XML original</summary><div class=\"xml-box\">" + esc(doc.xml_original) + "</div></details>"
-      : "";
-    return noteHtml + itemsHtml + xmlHtml;
+    return noteHtml + itemsHtml + pdfHtml(doc);
   }
 
   function bheDetailHtml(doc){
@@ -702,7 +855,7 @@
       "<div class=\"bhe-field\"><dt>Monto bruto</dt><dd>" + fmtCLP(doc.bruto) + "</dd></div>" +
       "<div class=\"bhe-field\"><dt>Retención" + (retPct != null ? " (" + String(retPct).replace(".",",") + "%)" : "") + "</dt><dd>" + fmtCLP(doc.retencion) + "</dd></div>" +
       "<div class=\"bhe-field\"><dt>Líquido a pagar</dt><dd>" + fmtCLP(doc.liquido) + "</dd></div>" +
-      "</dl>";
+      "</dl>" + pdfHtml(doc);
   }
 
   function estadoCellHtml(doc){
@@ -748,7 +901,9 @@
     var html = visible.map(function(doc){
       var isExpanded = expanded.has(doc.id);
       var isSelected = selected.has(doc.id);
-      var checkboxCell = doc.estado === "pendiente"
+      // Se puede marcar todo lo que todavía no está en Finnegans, incluidos los que
+      // fallaron: es como se los reintenta después de corregir el problema.
+      var checkboxCell = doc.estado !== "enviado"
         ? "<input type=\"checkbox\" data-action=\"select\" data-id=\"" + doc.id + "\" " + (isSelected ? "checked" : "") + " aria-label=\"Seleccionar documento\">"
         : (doc.estado === "enviado" ? "<span class=\"muted\" title=\"Ya enviado\">✓</span>" : "<span class=\"muted\">–</span>");
 
@@ -771,18 +926,41 @@
 
     tbody.innerHTML = html;
     renderBulkBar();
+    renderEnvioPie();
+  }
+
+  // Documentos marcados que todavia se pueden mandar, en el orden en que se ven.
+  function seleccionEnviable(){
+    return docs.filter(function(d){
+      return selected.has(d.id) && d.estado !== "enviado";
+    });
   }
 
   function renderEnvioPie(){
+    var resumen = document.getElementById("envioResumen");
+    var btn = document.getElementById("enviarTodoBtn");
+    var elegidos = seleccionEnviable();
     var pendientes = docs.filter(function(d){ return d.estado === "pendiente"; });
-    var suma = pendientes.reduce(function(s, d){ return s + d.total; }, 0);
-    document.getElementById("envioResumen").textContent = !sincronizado
-      ? ""
-      : (pendientes.length === 0
-          ? "No hay documentos pendientes de envío."
-          : pendientes.length + " documento" + (pendientes.length === 1 ? "" : "s") +
-            " pendiente" + (pendientes.length === 1 ? "" : "s") + " · " + fmtCLP(suma) +
-            " · el envío a Finnegans todavía no está implementado");
+
+    btn.disabled = enviando || elegidos.length === 0;
+    btn.textContent = enviando
+      ? "Enviando…"
+      : (elegidos.length === 0
+          ? "Enviar a Finnegans"
+          : "Enviar " + elegidos.length + " a Finnegans");
+    btn.title = elegidos.length === 0 ? "Marcá los documentos que querés enviar" : "";
+
+    if(!sincronizado){ resumen.textContent = ""; return; }
+    if(elegidos.length){
+      var suma = elegidos.reduce(function(s, d){ return s + d.total; }, 0);
+      resumen.textContent = elegidos.length + " seleccionado" + (elegidos.length === 1 ? "" : "s") +
+        " · " + fmtCLP(suma);
+      return;
+    }
+    resumen.textContent = pendientes.length === 0
+      ? "No hay documentos pendientes de envío."
+      : "Marcá los documentos que querés enviar (" + pendientes.length +
+        " pendiente" + (pendientes.length === 1 ? "" : "s") + ")";
   }
 
   function renderBulkBar(){
@@ -868,13 +1046,132 @@
     });
   }
 
+  // ---------- Envío a Finnegans ----------
+
+  function abrirConfirmacion(){
+    var elegidos = seleccionEnviable();
+    if(!elegidos.length){
+      showToast("Marcá al menos un documento para enviar.", true);
+      return;
+    }
+    var suma = elegidos.reduce(function(s, d){ return s + d.total; }, 0);
+    document.getElementById("confirmMeta").innerHTML =
+      "<div>" + elegidos.length + " documento" + (elegidos.length === 1 ? "" : "s") +
+      " · " + fmtCLP(suma) + "</div>";
+    document.getElementById("confirmLista").innerHTML = elegidos.map(function(d){
+      return "<div>" + esc(d.tipo_nombre || d.tipo) + " " + d.folio + " · " +
+        esc(d.proveedor_nombre) + " <span class=\"muted\">· " + fmtCLP(d.total) + "</span></div>";
+    }).join("");
+
+    var aviso = document.getElementById("confirmAviso");
+    var ok = document.getElementById("confirmOkBtn");
+    var json = document.getElementById("confirmJson");
+    aviso.textContent = "Consultando cómo quedaría el comprobante…";
+    json.textContent = "Cargando…";
+    ok.disabled = true;
+    document.getElementById("confirmJsonBox").open = false;
+    document.getElementById("confirmOverlay").hidden = false;
+
+    // Se arma el JSON del primero antes de habilitar el envío: si falta un parámetro de
+    // imputación o el proveedor no existe en Finnegans, se ve acá y no después de haber
+    // escrito medio lote en el ERP.
+    apiFetch("/api/documents/" + elegidos[0].id + "/finnegans").then(function(r){
+      if(!r.ok){
+        aviso.textContent = "No se puede enviar: " + (r.data.detail || ("error " + r.status));
+        json.textContent = "—";
+        return;
+      }
+      json.textContent = JSON.stringify(r.data, null, 2);
+      aviso.innerHTML =
+        "Se registran en <strong>" + esc(r.data.EmpresaCodigo) + "</strong>" +
+        " (circuito " + esc(r.data.WorkflowCodigo) + ")." +
+        " Esto escribe en Finnegans y no se puede deshacer desde el portal.";
+      ok.disabled = false;
+    });
+  }
+
+  function cerrarConfirmacion(){
+    document.getElementById("confirmOverlay").hidden = true;
+  }
+
+  function enviarSeleccion(){
+    var elegidos = seleccionEnviable();
+    if(!elegidos.length) return;
+    cerrarConfirmacion();
+    enviando = true;
+    renderEnvioPie();
+
+    apiFetch("/api/documents/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: elegidos.map(function(d){ return d.id; }) })
+    }).then(function(r){
+      if(!r.ok){
+        showToast("No se pudo enviar: " + (r.data.detail || ("error " + r.status)), true);
+        return;
+      }
+      var d = r.data;
+      // Los que salieron bien se destildan; los que fallaron quedan marcados para poder
+      // reintentarlos después de corregir, sin volver a buscarlos entre toda la bandeja.
+      (d.resultados || []).forEach(function(res){
+        if(res.estado === "enviado") selected.delete(res.id);
+      });
+      var msg = d.enviados + " enviado" + (d.enviados === 1 ? "" : "s");
+      if(d.empresa_finnegans) msg += " a " + d.empresa_finnegans;
+      if(d.con_error) msg += " · " + d.con_error + " con error";
+      if(d.omitidos) msg += " · " + d.omitidos + " ya estaban enviados";
+      showToast(msg, d.con_error > 0);
+      return loadDocuments();
+    }).catch(function(err){
+      console.error("Fallo al enviar a Finnegans:", err);
+      var esDeRed = (err instanceof TypeError) && /fetch|network|Failed/i.test(err.message || "");
+      showToast(esDeRed
+        ? "No se pudo conectar con el backend local."
+        : "Error inesperado al enviar: " + (err && err.message ? err.message : err), true);
+    }).then(function(){
+      enviando = false;
+      renderAll();
+    });
+  }
+
+  // Documento cuyo JSON ya está cargado en el modal de error, para no volver a pedirlo
+  // cada vez que se pliega y despliega.
+  var errorJsonId = null;
+
   function openErrorModal(id){
     var doc = docs.find(function(d){ return d.id === id; });
     if(!doc) return;
     document.getElementById("modalMeta").innerHTML =
       esc(doc.tipo_nombre || doc.tipo) + " · Folio " + doc.folio + "<br>" + esc(doc.proveedor_nombre) + " · " + esc(doc.proveedor_rut);
     document.getElementById("modalError").textContent = doc.error_detalle || "Error no especificado.";
+
+    // El JSON arranca plegado y se trae recién si lo despliegan: casi siempre el mensaje
+    // del ERP alcanza para entender qué pasó, y armarlo cuesta una consulta al backend.
+    var caja = document.getElementById("errorJsonBox");
+    caja.open = false;
+    caja.setAttribute("data-id", id);
+    errorJsonId = null;
+    document.getElementById("errorJson").textContent = "";
+
     document.getElementById("modalOverlay").hidden = false;
+  }
+
+  function cargarJsonDelError(){
+    var caja = document.getElementById("errorJsonBox");
+    if(!caja.open) return;
+    var id = parseInt(caja.getAttribute("data-id"), 10);
+    if(errorJsonId === id) return;
+    errorJsonId = id;
+
+    var pre = document.getElementById("errorJson");
+    pre.textContent = "Cargando…";
+    apiFetch("/api/documents/" + id + "/finnegans").then(function(r){
+      // Pueden haber cerrado el modal y abierto otro documento mientras cargaba.
+      if(errorJsonId !== id) return;
+      pre.textContent = r.ok
+        ? JSON.stringify(r.data, null, 2)
+        : "No se pudo armar el JSON: " + (r.data.detail || ("error " + r.status));
+    });
   }
   function closeErrorModal(){
     document.getElementById("modalOverlay").hidden = true;
@@ -891,6 +1188,26 @@
     if(action === "toggle"){
       if(expanded.has(id)) expanded.delete(id); else expanded.add(id);
       renderTable();
+    } else if(action === "ver-pdf"){
+      var visor = document.getElementById("pdfVisor-" + id);
+      if(visor.hasAttribute("hidden")){
+        // Se arma recién al abrirlo: montar un iframe por fila cargaría todos los PDF
+        // de la bandeja de una sola vez.
+        if(!visor.innerHTML){
+          visor.innerHTML = "<div class=\"pdf-cargando\">Trayendo el documento…</div>" +
+            "<iframe src=\"/api/documents/" + id + "/pdf\" title=\"Documento del SII\" hidden></iframe>";
+          var marco = visor.querySelector("iframe");
+          marco.addEventListener("load", function(){
+            visor.querySelector(".pdf-cargando").remove();
+            marco.removeAttribute("hidden");
+          });
+        }
+        visor.removeAttribute("hidden");
+        btn.textContent = "Ocultar documento";
+      } else {
+        visor.setAttribute("hidden", "");
+        btn.textContent = "Ver documento (PDF)";
+      }
     } else if(action === "view-error"){
       openErrorModal(id);
     }
@@ -905,7 +1222,7 @@
   });
 
   document.getElementById("selectAll").addEventListener("change", function(e){
-    var visiblePending = getVisibleDocs().filter(function(d){ return d.estado === "pendiente"; });
+    var visiblePending = getVisibleDocs().filter(function(d){ return d.estado !== "enviado"; });
     if(e.target.checked){
       visiblePending.forEach(function(d){ selected.add(d.id); });
     } else {
@@ -935,6 +1252,48 @@
   document.getElementById("searchInput").addEventListener("input", function(e){
     filters.q = e.target.value; renderTable();
   });
+  document.getElementById("loginForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    var btn = document.getElementById("loginBtn");
+    var err = document.getElementById("loginError");
+    err.hidden = true;
+    btn.disabled = true;
+    btn.textContent = "Ingresando…";
+    apiFetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        usuario: document.getElementById("loginUsuario").value,
+        password: document.getElementById("loginPassword").value
+      })
+    }).then(function(r){
+      if(r.ok){
+        document.getElementById("loginPassword").value = "";
+        mostrarLogin(false);
+        loadVersion();
+        return loadEmpresas().then(limpiarTableros);
+      }
+      err.hidden = false;
+      err.textContent = r.data.detail || ("No se pudo ingresar (error " + r.status + ")");
+    }).catch(function(){
+      err.hidden = false;
+      err.textContent = "No se pudo conectar con el servidor.";
+    }).then(function(){
+      btn.disabled = false;
+      btn.textContent = "Ingresar";
+    });
+  });
+
+  document.getElementById("logoutBtn").addEventListener("click", function(){
+    apiFetch("/api/logout", { method: "POST" }).then(function(){
+      docs = [];
+      empresas = [];
+      sincronizado = false;
+      renderAll();
+      mostrarLogin(true);
+    });
+  });
+
   document.getElementById("empresaSelect").addEventListener("change", function(e){
     empresaActual = e.target.value;
     try { localStorage.setItem("empresaActual", empresaActual); } catch(err){}
@@ -970,17 +1329,26 @@
     renderTable();
   });
 
+  document.getElementById("enviarTodoBtn").addEventListener("click", abrirConfirmacion);
+  document.getElementById("confirmCancelBtn").addEventListener("click", cerrarConfirmacion);
+  document.getElementById("confirmOkBtn").addEventListener("click", enviarSeleccion);
+  document.getElementById("confirmOverlay").addEventListener("click", function(e){
+    if(e.target.id === "confirmOverlay") cerrarConfirmacion();
+  });
+
+  document.getElementById("errorJsonBox").addEventListener("toggle", cargarJsonDelError);
   document.getElementById("modalCloseBtn").addEventListener("click", closeErrorModal);
   document.getElementById("modalOverlay").addEventListener("click", function(e){
     if(e.target.id === "modalOverlay") closeErrorModal();
   });
   document.addEventListener("keydown", function(e){
-    if(e.key === "Escape" && !document.getElementById("modalOverlay").hidden) closeErrorModal();
+    if(e.key !== "Escape") return;
+    if(!document.getElementById("confirmOverlay").hidden) cerrarConfirmacion();
+    if(!document.getElementById("modalOverlay").hidden) closeErrorModal();
   });
 
   renderAll();
-  loadVersion();
-  loadEmpresas().then(limpiarTableros);
+  arrancar();
 })();
 </script>
 

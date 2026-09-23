@@ -1,133 +1,181 @@
-# Contexto del proyecto para agentes de código (Codex, etc.)
+# Contexto del proyecto para agentes de IA
 
-Este archivo resume todo lo que un agente nuevo necesita para seguir trabajando en este
-repo sin haber visto la conversación original. Fue generado por Claude tras varias
-sesiones de trabajo con el dueño del proyecto (Fisterra SRL). Léelo completo antes de
-tocar código — hay una restricción de entorno (más abajo) que hace perder mucho tiempo
-si no se conoce de antemano.
+Todo lo que hace falta para seguir trabajando en este repo sin haber visto las
+conversaciones anteriores. Leelo entero antes de tocar código: hay varias trampas que
+cuestan horas si se descubren solas, y están todas anotadas acá abajo.
 
-## Qué es esto
+Última revisión: **23-sep-2026**. Si encontrás algo que ya no es cierto, corregilo en
+vez de dejarlo: este archivo solo sirve si se puede confiar en él.
 
-Sistema que se conecta al portal del SII (Servicio de Impuestos Internos, Chile),
-extrae los documentos de compra recibidos, y los envía al ERP Finnegans vía API. Lo
-usa el equipo de administración de Fisterra SRL para no tener que copiar a mano cada
-factura/boleta/nota de crédito del SII a Finnegans.
+---
 
-## Estado actual (resumen ejecutivo)
+## 1. Seguridad — leer primero, no es negociable
 
-- **Funciona hoy:** carga del certificado digital (.pfx), test de conexión TLS al SII,
-  **el login automatizado al SII** (`login_with_browser()`, confirmado end-to-end contra
-  producción — ver la sección del login más abajo), el backend completo (FastAPI +
-  SQLAlchemy + endpoints REST), y el portal web ("Bandeja SII") servido por el propio
-  backend, con la identidad de marca de Fisterra, ya conectado a la API real (no hay
-  datos de ejemplo).
-- **No funciona todavía (a propósito, con errores explícitos, no simulado):**
-  extraer documentos reales del SII (`get_rcv`/`get_bhe`/`get_dte_xml` están sin
-  implementar — falta mapear la navegación real del portal del SII) y enviar a
-  Finnegans (`FinnegansClient.send_document` sin implementar — falta la documentación
-  de su API, todavía no la pasó el usuario).
-- **Si venís de una versión anterior de este documento:** la "restricción de entorno
-  por proxy TLS interceptor" que se daba por cierta **quedó descartada**. No era la
-  causa del fallo de login. Ver la sección "✅ Login al SII: RESUELTO" más abajo antes
-  de tomar cualquier decisión de infraestructura basada en aquello.
+- **Nunca commitear** `secrets/`, `*.pfx`, `*.p12`, `.env`. Ya están en `.gitignore`:
+  no toques esas líneas.
+- **Nunca imprimir** el contenido de `.env`, la contraseña del certificado ni las
+  credenciales de Finnegans en la terminal, en mensajes al usuario, en commits o en
+  este archivo. Quedan en logs y transcripciones.
+- `secrets/certificado.pfx` es un **certificado digital de producción real**, no de
+  prueba. Emitido por E-CERTCHILE, vigente hasta 18-jun-2027. Si no está en tu
+  checkout, pedíselo al usuario: no lo reconstruyas ni lo inventes.
+- `secrets/sii_sesion.json` guarda **cookies de sesión vivas del SII**. Dan acceso a la
+  cuenta. Tratalo igual que al certificado.
+- **El repositorio de GitHub es público.** No agregues a ningún archivo versionado
+  nombres de personas, RUT de personas físicas, razones sociales de clientes ni nada
+  parecido. Una versión anterior de este archivo traía el nombre y el RUT del titular
+  del certificado y llegó a publicarse; se quitaron del texto actual, pero **siguen en
+  el historial de git** y solo desaparecen reescribiéndolo.
+- **Enviar a Finnegans escribe en un ERP.** No dispares un envío por tu cuenta: es una
+  operación que el usuario confirma, documento por documento o lote por lote.
 
-## Stack técnico
+---
 
-- Python 3.11+, FastAPI, SQLAlchemy (SQLite en dev, pensado para Postgres en prod),
-  Pydantic v2, `python-dotenv`.
-- `cryptography` para leer el certificado `.pfx` (PKCS12) y sacar la clave privada +
-  certificado en PEM.
-- `requests` para el test de conexión TLS simple.
-- **Playwright** (`playwright>=1.47`) para automatizar un Chromium real que hace el
-  login al SII con el certificado del almacén del sistema operativo — es el único
-  camino confirmado viable (ver hallazgo técnico abajo).
-- Frontend: HTML/CSS/JS vanilla en un solo archivo (`app/static/index.html`), sin
-  build step, servido directamente por FastAPI. Sigue el sistema de diseño de marca de
-  Fisterra (ver `references/fisterra-brand.md` si existe, o pedirle los tokens al
-  usuario — colores, tipografía Montserrat, radios, degradés).
+## 2. Qué es esto
 
-## Estructura del repo
+Extrae del portal del SII (Servicio de Impuestos Internos, Chile) los documentos de
+compra que reciben las empresas representadas por un certificado digital, y los manda
+al ERP **Finnegans (Teamplace)** por API. Lo usa el equipo de administración de
+Fisterra SRL para no copiar a mano factura por factura.
+
+No hay API del SII: **todo lo que se lee del SII se obtiene navegando su portal con un
+navegador real y el certificado digital.** La API de Finnegans es solo para la otra
+punta, el envío. Es un pedido explícito del dueño del proyecto y no hay que cambiarlo.
+
+---
+
+## 3. Estado actual
+
+**Anda, verificado contra producción:**
+
+| Pieza | Dónde |
+|---|---|
+| Login al SII con certificado | `SIIClient.login_with_browser()` |
+| Reuso de sesión y auto-freno de logins | `SIIClient.abrir_sesion()` |
+| Extracción del RCV por empresa y período | `SIIClient.get_rcv()` |
+| Empresas representadas, con razón social | `SIIClient.get_empresas_con_nombre()` |
+| Grilla de recibidos del Portal FE | `SIIClient.listar_recibidos_portal()` |
+| PDF del documento y desglose de ítems | `get_pdf_documento()` + `app/sii/pdf_dte.py` |
+| Portal web con login, selector de empresa y sincronización | `app/static/index.html` |
+| Armado del payload de Finnegans | `FinnegansClient.construir_payload()` |
+| Envío de la selección desde el portal | `POST /api/documents/send` |
+
+**No está hecho:**
+
+- `get_bhe()` — boletas de honorarios. Módulo aparte del SII, sin mapear.
+- `get_dte_xml()` — **hallazgo: el XML del DTE no se puede obtener del portal.** Se
+  recorrieron todas las vistas del RCV con la sesión iniciada y ninguna lo entrega. El
+  detalle de ítems sale del PDF, no del XML. No vuelvas a intentar este camino sin un
+  dato nuevo.
+
+**Nunca se registró un documento en Finnegans.** Hubo un intento el 23-sep-2026 y fue
+rechazado; el mensaje se perdió (ver §12). No hay ningún comprobante creado en el ERP.
+
+**Números de hoy** (base local, para dimensionar): 1.643 documentos, 55 empresas (30 de
+ellas en el Portal FE), 1.288 documentos con desglose de ítems, 137 con alguna
+observación sobre ese desglose. Versión `1.0.2`. Publicación 1.0.2 del 23-sep-2026, con ejemplos anonimizados.
+
+---
+
+## 4. Stack y estructura
+
+Python 3.11+, FastAPI, SQLAlchemy 2.0, Pydantic v2. SQLite en local, Postgres
+(`psycopg`) en la nube. Frontend: HTML/CSS/JS vanilla en un archivo, sin build.
 
 ```
 app/
-  main.py            → app FastAPI. Monta el router de documentos y sirve el portal
-                       en GET "/" (FileResponse de app/static/index.html) — mismo
-                       origen que la API, evita problemas de CORS/mixed-content.
-  config.py          → Settings: lee SII_RUT, SII_CERT_PATH, SII_CERT_PASSWORD,
-                       FINNEGANS_API_URL, FINNEGANS_API_KEY, FINNEGANS_ENV,
-                       DATABASE_URL desde .env. require_sii_credentials() valida y
-                       tira RuntimeError con mensaje accionable si falta algo.
-  db.py              → engine/SessionLocal de SQLAlchemy, Base, get_db(), init_db().
-  models.py          → Documento (tabla), TipoDocumento y EstadoDocumento (enums),
-                       y los schemas Pydantic de la API (DocumentoOut, SyncResult,
-                       EnviarResult, ItemSchema).
+  main.py          FastAPI. Monta el router, sirve el portal en GET "/",
+                   login/logout/version/sesion, y configura el logging (§12).
+  config.py        Settings desde .env. require_sii_credentials() falla con
+                   mensaje accionable si falta algo.
+  db.py            engine/SessionLocal/Base/get_db/init_db. Reescribe las URL
+                   postgres:// y postgresql:// al driver psycopg.
+  auth.py          Login del portal: cookie firmada con HMAC, 12 h (§10).
+  version.py       Única fuente de verdad de la versión (§11).
+  models.py        Documento y Empresa (tablas), TIPOS_DOCUMENTO (catálogo de
+                   45 tipos del SII), EstadoDocumento, y los schemas Pydantic.
   sii/
-    client.py         → SIIClient: _load_pkcs12() (carga real, funciona),
-                       test_connection() (funciona), login_with_browser() (Playwright,
-                       confirmado conceptualmente pero pendiente de correr una prueba
-                       real end-to-end fuera del sandbox — ver TODO), get_rcv()/
-                       get_bhe()/get_dte_xml() (NotImplementedError a propósito).
+    client.py      Todo el acceso al SII. Ver §5, §6, §7.
+    pdf_dte.py     Parser por coordenadas del PDF del SII. Ver §7.
   finnegans/
-    client.py         → FinnegansClient: valida config al instanciar, send_document()
-                       tira NotImplementedError con la lista de lo que falta definir
-                       (endpoint, mapeo de proveedores por RUT, mapeo de ítems, etc.)
+    client.py      Cliente de la API de Finnegans. Ver §8.
   routers/
-    documents.py       → GET /api/documents (filtros estado/tipo/q), POST /api/sync
-                       (dispara SIIClient.get_rcv/get_bhe — hoy 501 o 503), POST
-                       /api/documents/{id}/send (dispara FinnegansClient.send_document
-                       — hoy 501 o 503, y persiste el resultado en el Documento).
+    documents.py   Todos los /api/* de datos. Exigen sesión.
   static/
-    index.html         → El portal real ("Bandeja SII"). Vanilla JS, fetch contra
-                       /api/*. Sin dependencias externas salvo Google Fonts
-                       (Montserrat). Ver sección "Portal" abajo para detalles de UX.
+    index.html     El portal ("Bandeja SII"). Ver §9.
 scripts/
-  test_sii_connection.py → Diagnóstico CLI: valida .env, carga el certificado, prueba
-                       la conexión TLS a los hosts del SII. Correr primero siempre.
-secrets/
-  certificado.pfx     → EL CERTIFICADO REAL DE PRODUCCIÓN (ver sección Seguridad).
-                       Gitignored. Puede no existir en este checkout — pedírselo al
-                       usuario si falta.
-.env                  → Credenciales reales (gitignored). Ver .env.example para las
-                       claves que necesita. NUNCA leer su contenido en voz alta ni
-                       pegarlo en logs/commits/mensajes — ver Seguridad.
-.env.example          → Plantilla de las variables de entorno necesarias.
-README.md             → Overview del proyecto + cómo correrlo.
-SETUP_WINDOWS.md       → Guía paso a paso para correr todo (backend + portal) en la
-                       PC de Windows del usuario, que es donde hoy vive el desarrollo.
-requirements.txt       → Dependencias Python.
+  test_sii_connection.py   Valida .env + certificado + TLS. Correr primero.
+  probar_login_navegador.py Prueba manual del login.
+  recalcular_items.py      Rehace el control de ítems sin bajar PDF (§7).
+  reabrir_envios.py        Deja pendientes documentos ya "enviados" (§8).
+  copiar_a_postgres.py     Lleva la SQLite local a Postgres (§10).
+  subir_version.py         Sube la versión con arrastre (§11).
+api/index.py       Punto de entrada de Vercel.
+vercel.json        Manda todas las rutas a esa función.
+requirements.txt        Portal + base. Liviano: es lo único que instala Vercel.
+requirements-sync.txt   Lo anterior + cryptography, requests, playwright, pdfplumber.
+Excel datos/Reporte.xlsx  Catálogo de subtipos de transacción de Finnegans, que
+                   pasó el dueño del proyecto. Sin datos de clientes.
 ```
 
-## ✅ Login al SII: RESUELTO (16-sep-2026) — leer antes de tocar `sii/client.py`
+### Endpoints
 
-`SIIClient.login_with_browser()` **funciona**, confirmado end-to-end contra el SII de
-producción: inicia sesión, y desde esa sesión se llega al Registro de Compras y Ventas
-(`https://www4.sii.cl/consdcvinternetui/#/index`), que lista las empresas a las que el
-RUT tiene acceso.
+```
+GET    /                             el portal
+GET    /health, /api/version, /api/sesion      públicos
+POST   /api/login, /api/logout
 
-**Corrección importante de una conclusión anterior de este documento.** Durante varias
-sesiones se sostuvo que el login fallaba por un *proxy TLS interceptor* en el sandbox de
-la nube. **Esa hipótesis era incorrecta.** El mismo síntoma (redirect a `www.sii.cl`)
-aparecía en la PC de Windows del usuario, con salida directa a internet. Las causas
-reales eran dos, ambas del lado del cliente:
+GET    /api/documents                filtros: empresa, estado, tipo, q
+GET    /api/documents/{id}/pdf       representación impresa del SII
+GET    /api/documents/{id}/finnegans el JSON que se enviaría, sin enviarlo
+POST   /api/documents/{id}/send      envía uno
+POST   /api/documents/send           envía la selección  {"ids": [...]}
+GET    /api/empresas
+PATCH  /api/empresas/{rut}           nombre manual
+POST   /api/empresas/refrescar
+POST   /api/sync                     empresa, periodo, meses, con_items,
+                                     reprocesar_items, descargar_pdf
+```
 
-1. **El `confirm()` de JavaScript.** La página `zeusr.sii.cl/AUT2000/InicioAutenticacion/
-   IngresoCertificado.html` muestra un `confirm()` antes de auto-enviar el formulario de
-   autenticación, y su rama `else` es literalmente `location.replace('http://www.sii.cl')`.
-   Playwright **descarta los diálogos por defecto**, así que el `confirm()` devolvía
-   `false` y el navegador se iba solo a la home pública. Ese redirect, que se venía
-   leyendo como "el SII rechazó el certificado", era en realidad el flujo de cancelación.
-   Solución: `page.on("dialog", lambda d: d.accept())`.
+### Cómo correrlo
+
+```bash
+python -m venv .venv && .venv\Scripts\activate    # Windows
+pip install -r requirements-sync.txt
+playwright install chromium
+cp .env.example .env        # completar; nunca commitear
+python scripts/test_sii_connection.py
+uvicorn app.main:app --reload
+```
+
+Portal en `http://localhost:8000/`, docs en `/docs`. Guía detallada en
+`SETUP_WINDOWS.md`.
+
+---
+
+## 5. El login al SII
+
+`login_with_browser()` funciona. Costó entenderlo, y durante varias sesiones se culpó a
+un *proxy TLS interceptor* que **no tenía nada que ver**. Las dos causas reales eran del
+lado del cliente:
+
+1. **El `confirm()` de JavaScript.** `IngresoCertificado.html` muestra un `confirm()`
+   antes de auto-enviar el formulario, y su rama `else` es
+   `location.replace('http://www.sii.cl')`. Playwright **descarta los diálogos por
+   defecto**, así que devolvía `false` y el navegador se iba solo a la home pública. Ese
+   redirect se venía leyendo como "el SII rechazó el certificado" y era el flujo de
+   cancelación. Solución: `page.on("dialog", lambda d: d.accept())`.
 
 2. **El certificado nunca se presentaba.** El código usaba
-   `--auto-select-certificate-for-urls`, que **no es un switch de línea de comandos de
-   Chromium** — es una política de empresa (registro de Windows). Chromium lo ignoraba
-   en silencio. Solución: la opción `client_certificates` de Playwright (>=1.46).
+   `--auto-select-certificate-for-urls`, que **no es un switch de Chromium** — es una
+   política de empresa del registro de Windows. Chromium lo ignoraba en silencio.
+   Solución: la opción `client_certificates` de Playwright (>=1.46).
 
-   Detalle adicional: el `.pfx` de E-CERTCHILE usa un algoritmo que OpenSSL 3 rechaza
-   ("Unsupported TLS certificate"), así que `pfxPath` falla. Hay que pasarle los PEM que
-   `_load_pkcs12()` ya produce (`certPath`/`keyPath`).
+   El `.pfx` de E-CERTCHILE usa un algoritmo que OpenSSL 3 rechaza, así que `pfxPath`
+   falla: hay que pasarle los **PEM** que `_load_pkcs12()` ya produce
+   (`certPath` / `keyPath`), contra el origen `https://herculesr.sii.cl`.
 
-Datos concretos del flujo, por si hay que volver a depurarlo:
+El flujo, por si hay que volver a depurarlo:
 
 ```
 misiir.sii.cl/cgi_misii/siihome.cgi
@@ -137,291 +185,413 @@ misiir.sii.cl/cgi_misii/siihome.cgi
   → herculesr.sii.cl/cgi_AUT2000/CAutInicio.cgi                        (TLS mutuo)
 ```
 
-`herculesr.sii.cl` es el host que hace la autenticación TLS mutua. Se verificó aparte,
-con `requests`, que acepta el handshake con este certificado y responde 200.
+El certificado **no** necesita estar en el almacén del sistema operativo: se lee del
+`.pfx` en disco. El login es portable (Linux, contenedor, nube).
 
-**Consecuencias para la infraestructura.** El certificado ya **no** necesita estar en el
-almacén del sistema operativo: se lee del `.pfx` en disco. Eso vuelve el login portable
-(Linux, contenedor, cloud) y elimina el parámetro `nss_home`. Y el requisito de "salida a
-internet sin proxy interceptor" queda **sin fundamento confirmado** — se derivaba de la
-hipótesis descartada. Habrá que reprobarlo en el entorno de destino, pero ya no es una
-restricción conocida a la hora de elegir hosting.
+---
 
-## Empresas representadas
+## 6. ⚠️ El SII limita la frecuencia de logins
 
-El certificado de Alonso Álvarez representa a **55 contribuyentes**. El RCV los lista en
-su selector y en el servicio `getDcvEmpresasAutorizadas`, pero **solo por RUT**: el campo
-`razonSocONombreEmp` viene `null` para todos. No hay ninguna pantalla del portal que dé
-la lista con nombres.
+Observado tras unas 15 autenticaciones en menos de una hora: el login empieza a terminar
+en `https://www.sii.cl/servicios_online/1943-1945.html` de forma consistente, con el
+mismo certificado y el mismo flujo que venían funcionando. No está confirmado con el
+SII, pero es lo que encaja.
 
-El único lugar donde aparece la razón social de una empresa representada es el modal
-`verDTE` de un documento suyo ("Razón Social Receptor"). Por eso el nombre se resuelve
-de dos formas, y ninguna es obligatoria para que el sistema funcione:
+La estrategia **no es evadir el límite sino necesitar muy pocos logins**:
 
-- **Automática:** `get_rcv()` aprovecha que está en la pantalla de detalle y lee la razón
-  social del receptor (`SIIClient.get_nombre_empresa()`). Solo funciona si la empresa
-  tiene al menos un documento en el período.
-- **Manual:** el usuario le pone el nombre con el que la conoce desde el portal
-  (`PATCH /api/empresas/{rut}`). Un nombre puesto a mano **siempre** manda sobre el que
-  se lea del SII.
+- **Usá siempre `abrir_sesion()`.** Guarda las cookies en `secrets/sii_sesion.json` y en
+  el siguiente uso abre el navegador con ellas y comprueba con una sola petición si la
+  sesión sigue viva. Reusar tarda ~8 s contra ~40 s de un login completo, y una
+  sincronización entera puede correr sin autenticarse ni una vez.
+- **No llames a `login_with_browser()` desde código nuevo**: es la primitiva que fuerza
+  una autenticación.
+- Auto-freno en `_revisar_si_puedo_loguear()`: mínimo `MIN_SEGUNDOS_ENTRE_LOGINS` (120 s)
+  entre logins, y `ESPERA_TRAS_BLOQUEO_SEGUNDOS` (30 min) si el SII bloqueó. Los valores
+  son conservadores a propósito: no conocemos el umbral real. Cuando el freno actúa la
+  API responde **429**, no 502 — no es un fallo del SII, somos nosotros.
+- **Nunca reintentes un login en automático**: alarga el bloqueo.
+- `_sesion_viva()` comprueba **dos** cosas: que Mi SII reconozca la sesión y que el
+  módulo del RCV inicialice. Con solo la primera pasaban sesiones que después fallaban.
 
-`POST /api/empresas/refrescar` trae la lista desde el SII. Las empresas que el SII deja
-de listar se marcan `autorizada=False` en vez de borrarse, para no perder sus documentos.
+Al desarrollar: evitá sincronizaciones de prueba innecesarias. Cada una es tráfico real
+contra el SII.
 
-**Sin verificar todavía contra el SII** (quedó bloqueado por límite de frecuencia de
-logins mientras se desarrollaba esto, ver sección siguiente): `get_empresas()`,
-`get_nombre_empresa()` y la sincronización de varias empresas en una pasada
-(`POST /api/sync?empresa=todas`). El modelo, la API y el portal sí están verificados.
+---
 
-## Detalle de ítems: el Portal de Facturación Electrónica (RESUELTO)
+## 7. Lo que se lee del SII
 
-Una versión anterior de este documento daba el detalle de ítems por **imposible** desde
-el portal del SII, porque el RCV solo entrega cabeceras. Eso era cierto del RCV, pero
-**incompleto**: el detalle sí está disponible, en otro módulo.
+### RCV — Registro de Compras y Ventas
 
-**Dónde.** Servicios online → Factura electrónica → Sistema de facturación gratuito del
-SII → (elegir empresa) → "Historial de DTE y respuesta a documentos recibidos" → "Ver
-documentos recibidos". Cada fila tiene un `CODIGO` interno y, en el detalle, un enlace
-"VISUALIZACIÓN DOCUMENTO (pdf)".
+`https://www4.sii.cl/consdcvinternetui/#/index`. Es una SPA de Angular; los servicios
+útiles son `getResumen`, `getDetalleCompra` y `getDatosInicio`. Entrega **cabeceras**:
+emisor, folio, fecha, neto, IVA, exento, total, y el documento referenciado en las notas
+de crédito y débito. No entrega ítems.
+
+**Trampas de navegación, todas descubiertas rompiendo la sincronización:**
+
+- **No uses `page.reload()`.** Rompe la SPA: `getDatosInicio` empieza a responder 500.
+  Si ya estás en la URL del RCV, andá a `about:blank` y después navegá de nuevo.
+- Un `goto` que solo cambia el hash **no recarga**. De ahí el `about:blank`.
+- Antes de `select_option`, esperá el `option` concreto
+  (`select[name=rut] option[value="..."]`), no el `select`. Si no, salta un timeout de
+  "visible and enabled" en cuanto el combo tarda.
+- Envolvé el submit en `page.expect_response(... "getResumen" ...)`: es la única señal
+  confiable de que la consulta terminó.
+
+### Portal de Facturación Electrónica — de acá salen los PDF y los nombres
+
+Es un contexto distinto del RCV, con su propia selección de empresa.
 
 ```
 https://www1.sii.cl/cgi-bin/Portal001/mipeSelEmpresa.cgi      selección de empresa
 https://www1.sii.cl/cgi-bin/Portal001/mipeAdminDocsRcp.cgi    grilla de recibidos
     ?RUT_EMI=&FOLIO=&RZN_SOC=&FEC_DESDE=&FEC_HASTA=&TPO_DOC=&ESTADO=&ORDEN=&NUM_PAG=1
-https://www1.sii.cl/cgi-bin/Portal001/mipeShowPdf.cgi?CODIGO= el PDF del documento
+https://www1.sii.cl/cgi-bin/Portal001/mipeShowPdf.cgi?CODIGO=  el PDF
 ```
 
-Detalles comprobados: las fechas van en **AAAA-MM-DD** (con AAAAMMDD la grilla devuelve
-cero filas, sin avisar); la grilla pagina de a 100 con `NUM_PAG`; y hay que seleccionar
-la empresa en ese portal antes de consultar, es un contexto propio, distinto del RCV.
+- Las fechas van en **AAAA-MM-DD**. Con AAAAMMDD la grilla devuelve cero filas **sin
+  avisar**.
+- Pagina de a 100 con `NUM_PAG`.
+- Hay que seleccionar la empresa en este portal antes de consultar.
+- **No todas las empresas están**: solo las que registraron al titular como usuario de
+  este portal (30 de las 55 del RCV). Para el resto no hay desglose posible, y el portal
+  lo dice en vez de dejar filas sin explicación.
+- **No todos los documentos están**: la grilla y el RCV son listas distintas.
 
-**Por qué el PDF es parseable.** Lo genera el propio SII a partir del XML que guarda, así
-que la plantilla es la misma para todos los emisores. `app/sii/pdf_dte.py` lo lee por
-coordenadas (ver su docstring para el método y por qué repartir en columnas fijas no
-funciona). Probado contra Banco de Chile, Entel, Falabella, una estación de servicio, una
-consultora y una aseguradora.
+### Nombres de las empresas
 
-**Lo que hay que saber al usarlo:**
+El RCV lista las 55 empresas representadas **solo por RUT**: `razonSocONombreEmp` viene
+`null` para todas. La razón social sale del Portal FE
+(`get_empresas_con_nombre()`), que cubre 30. Para el resto está el nombre manual
+(`PATCH /api/empresas/{rut}`), que **siempre manda** sobre el automático. Las empresas
+que el SII deja de listar se marcan `autorizada=False`, no se borran.
 
-- **No todos los documentos están.** La grilla del Portal FE y el RCV son listas
-  distintas: hay documentos del RCV que no aparecen en el portal, y viceversa. Esos
-  quedan sin ítems, y el portal lo dice explícitamente en vez de simular un desglose.
-- **No todas las empresas están.** Al Portal FE solo entran las que registraron al
-  titular como usuario de ese portal (30 de las 55 del RCV).
-- **Acentos.** En bastantes PDF el SII incrusta las fuentes de modo que los acentos no
-  se pueden mapear y salen como "?" ("asesor?a"). Es del PDF de origen, no del parseo.
-- **Cuadratura.** Se compara la suma de los ítems contra el neto+exento del documento. Si
-  no cuadra (descuentos globales, otros cobros), se guarda la salvedad en
-  `items_observacion` y el portal la muestra; el desglose igual se conserva.
-- Hay emisores que usan líneas de ítem para metadatos ("RUTCOBRANZA 76030712" con valor
+### Ítems: se leen del PDF
+
+Lo genera el propio SII a partir del XML que guarda, así que la plantilla es la misma
+para todos los emisores. `app/sii/pdf_dte.py` lo lee por coordenadas (repartir en
+columnas fijas no funciona; ver su docstring).
+
+- **Control por ítem: cantidad × precio = subtotal**, con tolerancia de un peso o 1%
+  porque el SII redondea. Si el PDF no imprime una de las dos columnas, el dato se deduce
+  del subtotal y queda marcado en `derivado`: no se hace pasar por leído lo que es una
+  inferencia.
+- `_numero()` **rechaza cualquier token con letras**. Sin eso la unidad "M3" se leía como
+  cantidad 3.
+- Los tokens sobrantes de la cola numérica vuelven a la descripción; no se concatenan
+  (pegaba "140" y "2" en 1402).
+- **Lo que no cuadra no siempre es un error de parseo.** Hay emisores que aplican
+  descuento por monto, y la representación impresa del SII solo tiene columna para
+  descuento por porcentaje: muestra el precio de lista y el valor ya rebajado sin mostrar
+  la rebaja. El subtotal es el importe válido. Quedan con `cuadra: false` y el portal los
+  resalta.
+- Hay emisores que usan líneas de ítem para metadatos ("RUTCOBRANZA XXXXXXXX" con valor
   0). No se filtran: están en el documento.
+- En bastantes PDF los acentos salen como "?". Es del PDF de origen, no del parseo.
+- `scripts/recalcular_items.py` rehace el control sobre lo ya guardado **sin bajar
+  ningún PDF**. `POST /api/sync?reprocesar_items=true` relee los PDF de los que sí lo
+  necesitan.
 
-## Los nombres de las empresas salen del Portal de Facturación
+### El PDF: cuándo se baja y cuándo se guarda
 
-El RCV lista las empresas representadas solo por RUT. El Portal de Facturación
-Electrónica las lista **con razón social**, y de ahí las toma
-`SIIClient.get_empresas_con_nombre()`. Son menos (30 vs 55), así que para el resto sigue
-estando el nombre manual (`PATCH /api/empresas/{rut}`), que siempre manda sobre el
-automático.
+Pesa ~170 KB y no comprime: mil documentos son ~170 MB. Lo decide `PDF_MODO`:
 
-## ⚠️ El SII limita la frecuencia de logins
+| `PDF_MODO` | Al sincronizar | Al abrirlo |
+|---|---|---|
+| `demanda` (por defecto) | no lo baja | lo trae del SII y lo **deja guardado** |
+| `sincronizacion` | lo baja y guarda | ya está |
+| `nunca` | no lo baja | lo trae y no lo guarda |
 
-Observado el 16-sep-2026, después de unas 15 autenticaciones en menos de una hora
-durante el mapeo del RCV: el login empezó a terminar en
-`https://www.sii.cl/servicios_online/1943-1945.html` (una página de ayuda) en vez de
-iniciar sesión, de forma consistente, con el mismo certificado y el mismo flujo que
-venían funcionando. Se descartó que el mecanismo hubiera cambiado: la página
-`IngresoCertificado.html` seguía teniendo el `confirm()` y el formulario a
-`herculesr.sii.cl`, y el handshake TLS mutuo con ese host seguía respondiendo 200.
+`demanda` es el default porque solo ocupa espacio lo que a alguien le interesó abrir.
+Medido: la primera apertura ~10 s, la segunda 0,07 s.
 
-No está confirmado con el SII, pero la explicación que encaja es una limitación por
-frecuencia. `login_with_browser()` detecta ese redirect y lo reporta con un mensaje
-específico en vez del error genérico.
+**`demanda` y `nunca` necesitan hablar con el SII en el momento**, así que en serverless
+hay que usar `sincronizacion` o no habrá PDF que mostrar (el endpoint responde 501
+explicándolo). En la API, `tiene_pdf` es "ya está guardado" y `pdf_disponible` es "hay
+PDF, esté guardado o haya que ir a buscarlo".
 
-**Qué se hace al respecto** (implementado el 16-sep-2026). La estrategia no es evadir
-el límite sino **necesitar muy pocos logins**:
+---
 
-- `SIIClient.abrir_sesion()` es la puerta de entrada al SII para todo el código.
-  Guarda las cookies en `secrets/sii_sesion.json` y, en el siguiente uso, abre el
-  navegador con ellas y comprueba con **una** petición si la sesión sigue viva. Si
-  sirve, no se autentica. Medido: reusar tarda ~8 s contra ~40 s de un login completo,
-  y una sincronización entera puede correr sin autenticarse ni una vez.
-- **No** usar `login_with_browser()` directo desde código nuevo: es la primitiva que
-  fuerza una autenticación. Usar siempre `abrir_sesion()`.
-- Auto-freno en `_revisar_si_puedo_loguear()`: no se piden dos logins con menos de
-  `MIN_SEGUNDOS_ENTRE_LOGINS` (120 s) de diferencia, y si el SII bloqueó se espera
-  `ESPERA_TRAS_BLOQUEO_SEGUNDOS` (30 min) antes de volver a intentar. Los tiempos son
-  conservadores por elección: no conocemos el umbral real del SII. Cuando el freno
-  actúa, la API responde **429**, no 502 — no es un fallo del SII, somos nosotros.
-- Nunca reintentar un login en automático: alarga el bloqueo.
-- `secrets/sii_sesion.json` son cookies de sesión: dan acceso a la cuenta mientras
-  estén vivas. Está bajo `secrets/`, ya ignorado por git, y hay que tratarlo con el
-  mismo cuidado que el certificado.
+## 8. Finnegans (Teamplace)
 
-**Lo que no sabemos y convendría averiguar:** el umbral exacto del SII (cuántas
-autenticaciones en cuánto tiempo) y si hay un canal oficial para automatizar. El portal
-no está pensado para esto; los servicios web de "Intercambio de información" sí, y
-habilitarlos para este certificado es un trámite con el SII que vale la pena evaluar.
+`POST /facturaCompra`. Son **compras recibidas**: `/facturaVenta` pide `Cliente` y no es
+nuestro caso. El dueño del proyecto dijo al principio "factura de venta" y lo corrigió
+cuando se le señaló.
 
-## Certificado y credenciales — SEGURIDAD
+**Autenticación:** `GET /oauth/token?grant_type=client_credentials&client_id=…&client_secret=…`
+devuelve el token en **texto plano**, no JSON. Va después como `Authorization: Bearer`.
 
-`secrets/certificado.pfx` es un **certificado digital de producción real**, no un
-certificado de prueba. Titular: Alonso Enrique Álvarez Tejeda, RUT 10.439.188-5, empresa
-Alvarez Asociados SpA (cliente de Fisterra), emitido por E-CERTCHILE, vigente hasta
-18-jun-2027.
+**Mapeos comprobados contra la instancia real:**
 
-Reglas no negociables:
-- Nunca commitear `secrets/`, `*.pfx`, `*.p12`, `.env` (ya están en `.gitignore` — no
-  tocar esas líneas).
-- Nunca imprimir el contenido de `.env` ni la contraseña del certificado en salidas de
-  terminal que puedan quedar logueadas, en mensajes al usuario, ni en este tipo de
-  documento de contexto.
-- Si el certificado o el `.env` no están presentes en tu checkout, pedírselos al
-  usuario por un canal directo (no los reconstruyas ni los inventes).
-- Cuando esto pase a producción en la nube, el certificado y las credenciales deben
-  vivir en un gestor de secretos real, no en un `.env` plano en el servidor — todavía
-  sin definir proveedor.
+- **Proveedor**: el código de proveedor **es el RUT con puntos** (`XX.XXX.XXX-X`).
+  Nosotros lo guardamos sin puntos → `formatear_rut()`.
+- **Empresa**: `empresaChile/{codigo}` expone el RUT en `NumeroIdentificacion`, lo que
+  permite cruzarla automáticamente. Hay RUT con varios registros; se toma el activo de
+  código más bajo y se deja constancia en el log.
+- **Tipo de documento**: lo identifica `TransaccionSubtipoCodigo` (FC, FCEX, NCCPRA…),
+  ver `SUBTIPO_POR_TIPO_SII`. `TransaccionTipoCodigo` es siempre `OPER`.
+- **Moneda**: `PES`, no `CLP`. El catálogo tiene las dos; la instancia usa `PES`.
+- `ComprobanteTipoImpositivoCodigo` va en `null` y `CAE` vacío: son campos de AFIP
+  argentino que en Chile no se completan.
+- `Cotizaciones` **no puede ir vacío**: lleva al menos la moneda local en 1.
 
-## El portal ("Bandeja SII")
+**Dos cosas que la documentación no deja ver y un documento real sí:**
 
-`app/static/index.html`, servido en `GET /`. Diseño con identidad de marca Fisterra
-(Montserrat, paleta con rojo `#F52125` de acento, navy `#0A2F43`, superficies grises
-nunca blancas puras, "titular pareado" — línea en negrita roja + línea regular en
-navy). Reemplazó a un prototipo con datos de ejemplo que antes vivía como artifact en
-claude.ai — ese artifact quedó solo como referencia visual, ya no es lo que se usa.
+- **`Conceptos` es el desglose impositivo** (IVA y base gravada), **no** las líneas de
+  gasto. Leyendo solo la documentación se mapea mal.
+- **Las líneas van en `Productos`**, con un código del maestro.
 
-Funcionalidad implementada:
-- Trae documentos reales de `GET /api/documents` al cargar (no dispara sync solo).
-- Botón "Sincronizar con SII" llama a `POST /api/sync` (hoy devuelve error real, no
-  simulado, porque `get_rcv`/`get_bhe` no están implementados).
-- Selección de documentos pendientes (individual o en lote) y envío manual a Finnegans
-  vía `POST /api/documents/{id}/send` — **nunca automático**, requisito explícito del
-  usuario.
-- KPIs (pendientes/enviados/con error/total), tabs por estado, filtro por tipo de
-  documento, búsqueda por proveedor/RUT/folio, detalle expandible por fila (ítems del
-  XML para documentos del RCV, campos de retención para BHE), modal de error con
-  reintento.
-- Indicador de conexión al backend (verde/rojo) junto al título.
-- Bug ya corregido y a no reintroducir: el modal de error y las filas de detalle usan
-  el atributo HTML `hidden` — el CSS necesita `[hidden]{display:none !important;}`
-  explícito, si no una clase con `display:` en el mismo elemento gana la cascada y
-  el modal queda visible aunque tenga `hidden`.
+**`Vencimientos` no se manda.** El documento de ejemplo lo trae porque el ERP lo generó
+al grabarlo, pero armarlo desde acá significaría elegir la cuenta contable de
+proveedores, y esa imputación no nos corresponde. Decisión del dueño del proyecto.
 
-Por qué se sirve desde el propio backend y no como artifact hablándole a `localhost`:
-un artifact vive en `https://claude.ai`; un navegador moderno bloquea que una página
-https le hable a `http://localhost` ("mixed content"). Sirviendo el HTML desde el mismo
-FastAPI, todo queda en el mismo origen y no hay ese problema — además funciona hoy,
-local, sin depender de tener un backend en la nube.
+### ⚠️ Hay emisores que imprimen los ítems con IVA incluido
 
-## Cómo correrlo
+En el 8% de los documentos con desglose (104 de 1.287) **los ítems suman `neto × 1,19`**.
+Mandarlos como base gravada inflaría la factura: el documento usado en la prueba habría quedado
+registrado en $33.296 en vez de $27.980.
 
-Ver `SETUP_WINDOWS.md` para la guía completa paso a paso (Python, venv, `pip install -r
-requirements.txt`, `playwright install chromium`, completar `.env`, `uvicorn
-app.main:app --reload`). Resumen:
+`_productos()` verifica que las líneas sumen la base imponible. Cuando no cuadran **no
+reparte el importe a ojo**: manda una sola línea por la base real, que es el dato del que
+sí estamos seguros. El desglose sigue visible en el portal y en el PDF, como información.
 
-```bash
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-playwright install chromium   # no hace falta si ya hay Chromium preinstalado en el entorno
-cp .env.example .env          # completar con los datos reales, nunca commitear
-python scripts/test_sii_connection.py   # valida certificado + conexión TLS
-uvicorn app.main:app --reload
-```
+No quites ese control. El desglose del PDF es informativo; la base imponible del RCV es
+el dato contable.
 
-Portal en `http://localhost:8000/`, API en `http://localhost:8000/api/...`, docs
-automáticas en `http://localhost:8000/docs`.
+### Parámetros de imputación
 
-## Decisiones de producto ya tomadas (no volver a preguntar)
+Van en `.env` y **no tienen valor por defecto**: elegirlos mal deja asientos mal
+imputados. Si faltan, `construir_payload()` falla con un mensaje claro.
 
-- **Alcance de documentos:** TODOS los tipos — facturas afectas (33) y exentas (34),
-  notas de crédito (61) y débito (56), guías de despacho (52), boletas (39), y boletas
-  de honorarios electrónicas (BHE, sistema separado del RCV en el SII).
-- **Nivel de detalle:** hace falta el detalle de ítems, la cabecera del RCV no alcanza.
-  **RESUELTO** (16-sep-2026): se obtiene del PDF del documento en el Portal de
-  Facturación Electrónica — ver la sección "Detalle de ítems" más abajo, incluidas sus
-  limitaciones (no todos los documentos ni todas las empresas están ahí).
-- **Modo de ejecución:** bajo demanda (el usuario abre el portal y/o aprieta
-  "Sincronizar"), no desatendido ni programado por cron.
-- **Envío a Finnegans:** siempre manual, nunca automático. Desde el 16-sep-2026 el
-  portal tiene **un solo** control de envío, al pie de la bandeja, y está deshabilitado
-  porque el envío todavía no se implementó (falta la documentación de la API de
-  Finnegans). Se quitaron los botones "Enviar" por fila, el de la barra de selección y
-  el "Reintentar" del modal de error: había cuatro caminos de envío para una función que
-  no existe. El endpoint `POST /api/documents/{id}/send` sigue en el backend.
-- **Manejo de errores:** sin notificaciones proactivas (nada de mail/Slack). El
-  feedback es en el portal, al momento de sincronizar/enviar, con el error real.
-- **Infraestructura objetivo (más adelante):** en la nube, pero con salida directa a
-  internet sin proxy interceptor obligatorio (ver restricción de entorno arriba). Hoy:
-  todo corre local en la PC de Windows del usuario.
+| Variable | Valor hoy | Estado |
+|---|---|---|
+| `FINNEGANS_WORKFLOW` | `CENTRALIZA` | "Compras - CENTRALIZA", activo. **Sin confirmar por el dueño.** |
+| `FINNEGANS_PRODUCTO` | `GTOSGRAL` | "Gastos Generales", genérico. **Sin confirmar.** |
+| `FINNEGANS_EMPRESA_CODIGO` | `PRUEBA39` | Empresa de prueba. Vaciar para el cruce por RUT. |
+| `FINNEGANS_CONDICION_PAGO` | `30D` | Del documento de ejemplo. |
+| `FINNEGANS_MONEDA` | `PES` | |
+| `FINNEGANS_CONCEPTO_IVA` / `_EXENTO` | `COMPRA_IVA_19` / `ivacomexe` | |
 
-## Pendiente / próximos pasos, en orden
+`FINNEGANS_EMPRESA_CODIGO` fija la empresa destino **para todos** los documentos, sin
+importar de qué empresa del SII sean. Está para probar sin ensuciar la contabilidad real.
 
-1. ~~Confirmar el login automatizado por navegador~~ **HECHO** (16-sep-2026).
-   `login_with_browser()` autentica y lanza `SIIAuthenticationError` si no lo logra.
-   Script de prueba manual en `scripts/probar_login_navegador.py`.
-2. ~~Mapear la navegación del RCV~~ **HECHO** (16-sep-2026): `get_rcv()` implementado
-   y verificado contra producción. Falta lo mismo para **BHE**, que es un módulo
-   separado y sigue sin mapear. Y falta resolver el bloqueo del detalle de ítems
-   (ver "Nivel de detalle" arriba). Lo que sigue del punto original: Punto de partida ya confirmado: con la sesión iniciada,
-   `https://www4.sii.cl/consdcvinternetui/#/index` abre el Registro de Compras y Ventas
-   y presenta un selector con las empresas a las que el RUT tiene acceso (hay 8; la del
-   proyecto es 10439188-5) — falta mapear desde ahí los períodos, el detalle y el XML. E
-   implementar `get_rcv()`, `get_bhe()`, `get_dte_xml()` en `app/sii/client.py`, más la
-   persistencia en `POST /api/sync` (hoy tiene un TODO explícito: "persistir rcv + bhe
-   como Documento, evitando duplicados por (tipo, folio, proveedor_rut)").
-3. **Conseguir del usuario la documentación/credenciales de la API de Finnegans** y
-   completar `FinnegansClient.send_document()`: endpoint de comprobantes de compra,
-   cómo identifica proveedores por RUT (qué hacer si no existen), mapeo de ítems del
-   XML a productos/conceptos, plan de cuentas/centro de costo por defecto, reglas para
-   evitar duplicados, si se puede editar el documento antes de enviarlo.
-4. Definir el período histórico desde el cual cargar documentos en la primera
-   sincronización.
-5. Terminar de subir el código al repo remoto (ver estado del repo abajo).
-6. Elegir proveedor cloud para producción (con el requisito de salida directa sin
-   proxy interceptor) y un gestor de secretos real para el certificado/credenciales.
-7. Definir usuarios/roles con acceso al portal.
+**Consecuencia a no olvidar:** un documento enviado a `PRUEBA39` queda marcado como
+enviado en nuestra base y después no saldría hacia la empresa que corresponde. Para eso
+está `scripts/reabrir_envios.py`, que los vuelve a dejar pendientes. **No borra nada en
+Finnegans**: los comprobantes de prueba se dan de baja desde el ERP.
 
-## Versión del portal y cuándo subirla
+Catálogos útiles, todos de solo lectura:
+`empresaChile`, `proveedor/list`, `producto/list`, `condicionPago/list`, `moneda/list`,
+`WorkflowEntidadAPI/list`. Los de `workflow/list`, `circuito/list` y
+`transaccionSubtipo/list` responden 501: no existen.
 
-La versión se muestra en el encabezado del portal y vive en **`app/version.py`**, que es
-la única fuente de verdad: de ahí la toman FastAPI (`/openapi.json`), el endpoint
-`GET /api/version` y el encabezado del portal, que la pide al cargar. No escribirla a
-mano en el HTML.
+### Lo que falta resolver con el dueño del proyecto
 
-**La numeración no es semver.** Es un contador de tres dígitos que avanza de a uno y
-arrastra al llegar a 10, por pedido del dueño del proyecto:
+1. Confirmar `WorkflowCodigo` y `ProductoCodigo` (¿uno genérico para todo, o mapeo por
+   rubro?).
+2. **66 proveedores** de 190 documentos no existen en Finnegans. Hay que crearlos allá.
+3. Ejemplos pedidos y no entregados: una **nota de crédito** y una **factura exenta**
+   exportadas del ERP, para validar esos mapeos como se hizo con la factura.
+4. Cuál de los registros de empresa duplicados es la correcta.
+
+---
+
+## 9. El portal ("Bandeja SII")
+
+`app/static/index.html`, servido en `GET /`. Vanilla JS, sin build, sin dependencias
+salvo Google Fonts. Identidad de marca Fisterra: Montserrat, rojo `#F52125` de acento,
+navy `#0A2F43`, superficies grises nunca blancas puras, "titular pareado" (línea en
+negrita roja + línea regular en navy).
+
+**El flujo es: primero la empresa, después sincronizar.** Al cambiar de empresa los
+tableros se limpian hasta que se sincronice, para que nunca se confunda lo que se está
+viendo con la empresa elegida. Sin sincronizar los KPI muestran "–", no "0": un cero
+afirmaría que la empresa no tiene documentos, y lo que pasa es que todavía no se
+consultó.
+
+Funcionalidad: KPI, tabs por estado, filtro por tipo, búsqueda por proveedor/RUT/folio,
+detalle expandible con los ítems, insignia de desglose (`sí` / `parcial` / `no`), visor
+de PDF embebido, modal de error con el JSON del documento, y el envío a Finnegans.
+
+**El envío.** Un solo control, al pie de la bandeja, sobre la **selección**. Antes de
+mandar nada se pide `GET /api/documents/{id}/finnegans` del primero y se muestra en la
+confirmación: si falta un parámetro de imputación o el proveedor no existe, se ve ahí y
+el botón queda bloqueado, en vez de enterarse a mitad del lote. Se puede marcar lo que
+falló (así se reintenta); lo ya enviado no.
+
+**Nunca automático.** Requisito explícito del dueño del proyecto.
+
+Trampas del frontend:
+
+- El modal y las filas de detalle usan el atributo `hidden`. El CSS necesita
+  `[hidden]{display:none !important;}` explícito: si no, una clase con `display:` en el
+  mismo elemento gana la cascada.
+- Los modales llevan `margin:auto` además de `align-items:center`. Con solo lo segundo,
+  un modal más alto que la ventana se recorta por arriba y deja los botones fuera de
+  alcance.
+- Al editar el HTML, **el navegador cachea**. Si ves comportamiento viejo, forzá la
+  recarga antes de salir a buscar el bug en otro lado.
+- No atribuyas todo fallo de `fetch` a la red: un error de JavaScript cae en el mismo
+  `catch` y se reportaba como "el backend no responde", mandando a diagnosticar el lugar
+  equivocado.
+
+---
+
+## 10. Datos, despliegue y acceso
+
+### Modelo
+
+`Documento` tiene `UniqueConstraint(empresa_rut, tipo, folio, proveedor_rut)`: la
+empresa entra en la clave porque dos empresas distintas pueden recibir el mismo tipo y
+folio del mismo proveedor y no son el mismo documento.
+
+- `tipo` es un **String con el código del SII**, no un enum cerrado: el SII puede agregar
+  tipos y uno nuevo tiene que entrar igual, mostrándose como "Tipo N", en vez de reventar
+  la sincronización. `TIPOS_DOCUMENTO` es solo para el nombre legible.
+- `EstadoDocumento` sí es enum, y se persiste **por valor** (`values_callable`), no por
+  nombre. Sin eso `?tipo=33` devolvía 500.
+- **`Documento.items` usa `JSON(none_as_null=True)`.** Sin eso SQLAlchemy guarda Python
+  `None` como el texto JSON `'null'` en vez de NULL de SQL, y el filtro `items IS NULL`
+  con el que la sincronización busca qué enriquecer deja de encontrarlos. Apareció al
+  copiar a otra base: 185 documentos quedaban invisibles.
+- La sesión usa `autoflush=False`: hay que hacer **`db.flush()`** antes de seleccionar
+  documentos recién creados, o el enriquecimiento no los ve.
+- La sincronización actualiza los documentos existentes y **nunca pisa su estado de
+  envío** a Finnegans.
+
+### Despliegue: dos mitades
+
+El sistema **no puede correr entero en Vercel**. La sincronización necesita un Chromium
+real con el certificado, sesión en disco y minutos de ejecución. Una función serverless
+no tiene nada de eso. No es un problema de configuración.
+
+| | Dónde | Qué hace |
+|---|---|---|
+| Portal + API de lectura | Vercel | Muestra la bandeja, lee de Postgres |
+| Sincronización | Máquina con el certificado | Habla con el SII, escribe en el mismo Postgres |
+
+Consecuencias en el código:
+
+- `requirements.txt` es el set liviano y es lo único que instala Vercel. El stack del SII
+  vive en `requirements-sync.txt`.
+- **`app/routers/documents.py` no importa `app.sii.client` arriba**: lo hace dentro de las
+  funciones (`_sii()`). Si volvés a poner el import a nivel de módulo, el despliegue deja
+  de arrancar.
+- `POST /api/sync` y `POST /api/empresas/refrescar` detectan el entorno (variable
+  `VERCEL`) y responden **501** con la explicación, en vez de un ImportError.
+- `scripts/copiar_a_postgres.py` lleva los datos de la SQLite local al Postgres sin volver
+  a sincronizar contra el SII (que además presiona el límite de logins).
+
+Pendiente del lado del usuario: crear el Postgres en Vercel y cargar las variables de
+entorno.
+
+### Acceso al portal
+
+`app/auth.py`: usuario y contraseña por variables de entorno (`PORTAL_USUARIO`,
+`PORTAL_PASSWORD`) y cookie firmada con HMAC sobre `SECRET_KEY`, 12 horas. No hay tabla
+de usuarios: es un portal interno.
+
+- Si faltan esas variables el portal **no se abre**, en vez de quedar accesible.
+- Todo el router de datos exige sesión. Públicos: `/api/version` y `/api/sesion`.
+- `PORTAL_COOKIE_INSEGURA=1` **solo** en desarrollo sobre `http://localhost`.
+
+---
+
+## 11. Versión
+
+Vive en **`app/version.py`**, única fuente de verdad: de ahí la toman FastAPI,
+`GET /api/version` y el encabezado del portal. No la escribas a mano en el HTML.
+
+**No es semver.** Es un contador de tres dígitos que avanza de a uno y arrastra al llegar
+a 10, por pedido del dueño del proyecto:
 
 ```
 1.0.0 → 1.0.1 → … → 1.0.9 → 1.1.0 → … → 1.9.9 → 2.0.0
 ```
 
-O sea que después de `1.0.9` viene `1.1.0`, **no** `1.0.10`. Es el error fácil de
-cometer, así que existe `scripts/subir_version.py`, que aplica el arrastre solo.
+Después de `1.0.9` viene `1.1.0`, **no** `1.0.10`. Por eso existe
+`scripts/subir_version.py`, que aplica el arrastre solo.
 
-**Cuándo se incrementa: una vez por cada publicación a GitHub.** No por cada cambio ni
-por cada commit. La secuencia al publicar es:
+**Se incrementa una vez por cada publicación a GitHub**, no por cada cambio ni por cada
+commit:
 
 ```bash
-python scripts/subir_version.py   # 1.0.0 → 1.0.1
+python scripts/subir_version.py   # 1.0.1 → 1.0.2
 git add -A && git commit && git push
 ```
 
-Si se llega a `9.9.9` el script falla a propósito en vez de inventar un formato nuevo:
-hay que decidir con el dueño del proyecto cómo seguir.
+Remoto: `https://github.com/FisterraSRL/ExtraccionDocumentosSII.git`. Es **público**.
 
-## Estado del repositorio Git
+---
 
-Remoto: `https://github.com/FisterraSRL/ExtraccionDocumentosSII.git` — al 16-sep-2026
-estaba **completamente vacío** (sin ningún commit subido todavía). El historial local
-tenía 3 commits (scaffolding inicial, `login_with_browser()` + hallazgo del proxy,
-portal real conectado a la API). Si estás viendo esto en un checkout que ya tiene ese
-historial y está sincronizado con el remoto, ignorá este párrafo — probablemente ya se
-resolvió. Si no, confirmá el estado con `git log` y `git remote -v` antes de asumir nada.
+## 12. Trampas conocidas y errores ya cometidos
 
-## Documento de referencia más detallado
+Los técnicos están en su sección; estos son los que no encajan en ninguna:
 
-Además de este archivo, existe `requisitos-portal-sii-finnegans.md` en el proyecto de
-Claude asociado (fuera de este repo de código) con el log completo de decisiones,
-capturas de pantalla y el detalle turno por turno de cómo se llegó a cada conclusión.
-Si tenés acceso a integraciones de Claude/Anthropic y necesitás más contexto histórico
-que el que cabe acá, preguntale al usuario por ese documento.
+- **uvicorn no configura los loggers de la aplicación.** Los deja en WARNING sin handler,
+  así que nada de lo que registra la app sale por ningún lado. Se descubrió cuando un
+  envío a Finnegans falló y el motivo, que sí se registraba, no quedó en ninguna parte.
+  `app/main.py` ahora hace `logging.basicConfig()`. No lo saques.
+
+- **El usuario puede estar usando el portal mientras trabajás.** Pasó: mientras se
+  editaba código, el dueño apretó "Enviar" y el intento falló. Después, para probar el
+  modal de error, se marcó **ese mismo documento** con un error de prueba y **se
+  sobrescribió el mensaje real**, que no estaba en ningún log. La regla: antes de
+  modificar cualquier fila de la base, mirá qué hay ahí; y para probar, usá un documento
+  que no tenga nada que ver con lo que el usuario está mirando.
+
+- **No confundas "lo que se mandaría ahora" con "lo que se mandó".** El JSON que muestra
+  el modal de error se rearma en el momento con la configuración actual. Es lo útil para
+  decidir si reintentar, pero no es un registro histórico.
+
+- **Sincronizar es caro.** Cada prueba es tráfico real contra el SII y acerca el bloqueo
+  por frecuencia (§6). Verificá con la base que ya tenés siempre que puedas.
+
+---
+
+## 13. Decisiones ya tomadas — no volver a preguntar
+
+- **Alcance:** todos los tipos de documento del RCV, más BHE cuando se implemente.
+- **Detalle de ítems:** hace falta; sale del PDF del Portal FE, no del XML.
+- **Modo de ejecución:** bajo demanda. El usuario abre el portal y aprieta "Sincronizar".
+  Nada de cron ni desatendido.
+- **Envío a Finnegans:** siempre manual, sobre la selección, nunca automático.
+- **Manejo de errores:** sin notificaciones proactivas (nada de mail ni Slack). El
+  feedback es en el portal, con el error real.
+- **Fuente de datos:** el SII se lee con el certificado digital navegando su portal. La
+  API de Finnegans es solo para el envío. No cambies esto.
+
+### Convenciones de código
+
+- Todo en **español**, incluidos nombres de funciones y variables del código nuevo que
+  siga el estilo del que está alrededor.
+- Los comentarios explican **por qué**, no qué. El código ya dice qué hace. Si algo se
+  hace de una forma rara, el comentario tiene que decir qué pasó cuando se hizo de la
+  forma obvia.
+- Mensajes de error **accionables**: qué falta y qué hacer, no un stack trace.
+- Nada de valores por defecto inventados donde una elección equivocada tenga
+  consecuencias (imputación contable, por ejemplo). Preferí fallar con un mensaje claro.
+- Commits en español, en presente, sin tildes (por la codificación de la terminal), con
+  un cuerpo que explique el porqué.
+
+---
+
+## 14. Pendientes, en orden
+
+1. **Que el primer documento entre en Finnegans.** Reintentar el documento usado en la prueba y leer el
+   error real, que ahora sí queda en la base y en el log.
+2. Confirmar con el dueño `WorkflowCodigo` y `ProductoCodigo`.
+3. Crear en Finnegans los 66 proveedores que faltan.
+4. Pedir los ejemplos de nota de crédito y factura exenta, y validar esos mapeos.
+5. Publicación 1.0.2 del 23-sep-2026: cambios acumulados y ejemplos anonimizados.
+6. Terminar el despliegue en Vercel: Postgres, variables de entorno,
+   `scripts/copiar_a_postgres.py`.
+7. Implementar `get_bhe()`.
+8. Definir el período histórico desde el cual cargar en la primera sincronización.
+9. Gestor de secretos real para el certificado y las credenciales cuando esto viva en la
+   nube. Hoy es un `.env` plano.
+10. Cosmético: el indicador de conexión del portal se queda en "Conectando con el
+    backend…".
+11. El `README.md` quedó congelado en la etapa de scaffolding y hoy describe mal el
+    proyecto (dice que no hay conexión ni al SII ni a Finnegans, y nombra librerías que
+    ya no se usan). Está publicado.

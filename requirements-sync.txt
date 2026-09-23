@@ -1,0 +1,9 @@
+# Todo lo del portal, más lo que hace falta para sincronizar con el SII: leer el
+# certificado, hablar TLS mutuo, manejar el navegador y parsear los PDF.
+# Es lo que se instala en la máquina que corre la sincronización (ver SETUP_WINDOWS.md).
+-r requirements.txt
+
+cryptography>=42.0
+requests>=2.32
+playwright>=1.47
+pdfplumber>=0.11

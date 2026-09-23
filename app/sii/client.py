@@ -41,6 +41,7 @@ acepta el handshake con este certificado y responde 200).
 from __future__ import annotations
 
 import json
+import logging
 import re
 import tempfile
 import time
@@ -64,6 +65,8 @@ from cryptography.hazmat.primitives.serialization import (
 # certificado. Confirmado probando el handshake directo con requests.
 SII_CERT_AUTH_ORIGIN = "https://herculesr.sii.cl"
 SII_MISII_HOME = "https://misiir.sii.cl/cgi_misii/siihome.cgi"
+
+log = logging.getLogger(__name__)
 
 # Registro de Compras y Ventas. La UI es una SPA Angular que habla con estos servicios
 # JSON; llamarlos directo (con las cookies de la sesión del navegador) es mucho más
@@ -283,7 +286,19 @@ class SIIClient:
             )
 
     def _sesion_viva(self, page) -> bool:
-        """¿Las cookies guardadas siguen sirviendo? Una sola petición, sin autenticar."""
+        """¿Las cookies guardadas siguen sirviendo para lo que vamos a hacer?
+
+        Se comprueban **dos cosas**, y hacen falta las dos:
+
+        1. Que Mi SII nos reconozca (barato).
+        2. Que el módulo del RCV arranque, o sea que su selector de empresas se llene.
+
+        La segunda no es paranoia: hay sesiones que pasan la primera y fallan la segunda.
+        Cuando eso pasa, `getDatosInicio` del RCV responde 500, la SPA nunca carga las
+        empresas y la sincronización muere esperando un formulario que jamás se habilita.
+        Comprobar solo Mi SII hacía que reusáramos una sesión inservible y que el error
+        apareciera mucho después, disfrazado de problema de timing.
+        """
         try:
             page.goto(SII_MISII_HOME, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(800)
@@ -291,7 +306,22 @@ class SIIClient:
         except Exception:
             return False
         rut_plano = self.rut.replace(".", "").replace("-", "")
-        return "Cerrar Sesión" in texto or rut_plano[:8] in texto.replace(".", "").replace("-", "")
+        reconocido = (
+            "Cerrar Sesión" in texto
+            or rut_plano[:8] in texto.replace(".", "").replace("-", "")
+        )
+        if not reconocido:
+            return False
+
+        try:
+            page.goto(RCV_UI + "#/index", wait_until="networkidle", timeout=45000)
+            page.wait_for_selector(
+                "select[name=rut] option[value]:not([value=''])", state="attached", timeout=20000
+            )
+            return True
+        except Exception:
+            log.info("La sesión guardada ya no sirve para el RCV: se vuelve a autenticar.")
+            return False
 
     def abrir_sesion(self, headless: bool = True, forzar_login: bool = False):
         """Devuelve una sesión autenticada, **reusando** la anterior si sigue viva.
@@ -455,7 +485,7 @@ class SIIClient:
         empresas que registraron al titular como usuario del portal de facturación, que
         pueden ser menos que las que lo autorizaron a consultar el RCV.
 
-        Devuelve [{"rut": "77185459-1", "nombre": "CENTRALIZA SPA"}, ...].
+        Devuelve [{"rut": "XXXXXXXX-X", "nombre": "Empresa de ejemplo"}, ...].
         """
         propia = session is None
         if propia:
@@ -473,7 +503,7 @@ class SIIClient:
                 rut = (o["rut"] or "").strip()
                 if not rut:
                     continue
-                # El texto es "RAZON SOCIAL 77025379-9": el RUT va al final.
+                # El texto es "RAZON SOCIAL XXXXXXXX-X": el RUT va al final.
                 nombre = re.sub(r"\s*" + re.escape(rut) + r"\s*$", "", o["txt"]).strip()
                 empresas.append({"rut": rut, "nombre": nombre or None})
             return empresas
@@ -598,11 +628,20 @@ class SIIClient:
             )
         return resp.body()
 
-    def get_items_documento(self, codigo: str, session):
-        """PDF → detalle de ítems. Devuelve un `DetalleDTE` (ver app/sii/pdf_dte.py)."""
+    @staticmethod
+    def extraer_detalle_pdf(pdf_bytes: bytes):
+        """Detalle de ítems a partir de un PDF ya descargado (ver app/sii/pdf_dte.py).
+
+        Separado de la descarga para que quien necesite además guardar el archivo no
+        tenga que pedírselo dos veces al SII.
+        """
         from app.sii.pdf_dte import extraer_detalle
 
-        return extraer_detalle(self.get_pdf_documento(codigo, session))
+        return extraer_detalle(pdf_bytes)
+
+    def get_items_documento(self, codigo: str, session):
+        """PDF → detalle de ítems, en un paso."""
+        return self.extraer_detalle_pdf(self.get_pdf_documento(codigo, session))
 
     def get_empresas(self, session=None) -> list[str]:
         """Lista los RUT de las empresas que este certificado puede consultar en el RCV.
@@ -659,11 +698,11 @@ class SIIClient:
 
     @staticmethod
     def _partir_rut(rut: str) -> tuple[str, str]:
-        """'10.439.188-5' → ('10439188', '5')."""
+        """'XX.XXX.XXX-X' → ('XXXXXXXX', 'X')."""
         limpio = rut.replace(".", "").replace(" ", "").upper()
         cuerpo, _, dv = limpio.partition("-")
         if not cuerpo or not dv:
-            raise ValueError(f"RUT con formato inesperado: {rut!r} (se esperaba 12345678-9)")
+            raise ValueError(f"RUT con formato inesperado: {rut!r} (se esperaba XXXXXXXX-X)")
         return cuerpo, dv
 
     @staticmethod
@@ -686,16 +725,61 @@ class SIIClient:
             "fecha_recepcion_sii": fila.get("detFecRecepcion"),
         }
 
+    @classmethod
+    def _rcv_consultar(cls, page, rut_objetivo: str, mes: str, anho: str, intentos: int = 2) -> dict:
+        """Completa el formulario del RCV y devuelve el JSON de getResumen.
+
+        Reintenta una vez: en corridas largas el SII a veces tarda más de la cuenta y el
+        formulario expira. Antes eso cortaba la sincronización entera de esa empresa.
+        """
+        for intento in range(1, intentos + 1):
+            try:
+                return cls._rcv_consultar_una_vez(page, rut_objetivo, mes, anho)
+            except Exception:
+                if intento == intentos:
+                    raise
+                log.warning(
+                    "Reintentando la consulta del RCV de %s %s-%s (intento %d falló)",
+                    rut_objetivo, anho, mes, intento,
+                )
+                page.wait_for_timeout(3000)
+        raise AssertionError("inalcanzable")
+
     @staticmethod
-    def _rcv_consultar(page, rut_objetivo: str, mes: str, anho: str) -> dict:
-        """Completa el formulario del RCV y devuelve el JSON de getResumen."""
+    def _rcv_consultar_una_vez(page, rut_objetivo: str, mes: str, anho: str) -> dict:
+        # Dos cosas que hay que respetar a la vez, y que se descubrieron rompiéndolas:
+        #
+        # 1. `goto` a una URL que solo difiere en el hash NO recarga la página. Como la
+        #    sincronización entra al detalle (#detalle/33) y vuelve a #/index, sin una
+        #    carga real la SPA queda con el estado anterior: el formulario se completa,
+        #    el click se hace, y el SII nunca recibe la consulta.
+        # 2. Pero `reload()` sobre el RCV **lo rompe**: al reinicializarse así, su
+        #    `getDatosInicio` responde 500 y el selector de empresas nunca se llena.
+        #
+        # La salida es pasar por una página en blanco y volver a entrar: es una carga
+        # limpia del módulo, que es lo único que el RCV tolera.
+        if page.url.startswith(RCV_UI):
+            page.goto("about:blank", timeout=30000)
         page.goto(RCV_UI + "#/index", wait_until="networkidle", timeout=60000)
         page.wait_for_timeout(1500)
+        # No alcanza con que el formulario esté en el DOM: la SPA lo pinta vacío y recién
+        # después le carga las empresas, y mientras tanto el select queda deshabilitado.
+        # Esperar a que la opción concreta exista es lo que garantiza que ya se puede
+        # elegir; sin esto `select_option` expira de forma intermitente.
+        page.wait_for_selector("button[type=submit]", state="visible", timeout=30000)
+        page.wait_for_selector(
+            f'select[name=rut] option[value="{rut_objetivo}"]', state="attached", timeout=30000
+        )
         with page.expect_response(lambda r: "getResumen" in r.url, timeout=60000) as esperado:
             page.select_option("select[name=rut]", rut_objetivo)
             page.select_option("#periodoMes", mes)
             page.select_option("select[ng-model=periodoAnho]", anho)
-            page.click("button[type=submit]")
+            # force=True a propósito: Angular re-renderiza el formulario al cambiar los
+            # select y Playwright se queda esperando que el botón quede "estable", lo que
+            # hacía fallar la consulta de forma intermitente. Ya se comprobó arriba que
+            # el botón existe y es visible, así que la comprobación de estabilidad no
+            # agrega seguridad, solo fragilidad.
+            page.click("button[type=submit]", force=True, timeout=30000)
         resumen = esperado.value.json()
         estado = resumen.get("respEstado") or {}
         if estado.get("codRespuesta") not in (0, None):

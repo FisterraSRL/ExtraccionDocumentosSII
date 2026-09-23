@@ -6,8 +6,8 @@ Electrónica del SII, en "Historial de DTE y respuesta a documentos recibidos", 
 la representación impresa en PDF de cada documento recibido, y **ese PDF lo genera el
 propio SII** a partir del XML que tiene guardado. Eso es lo que lo hace parseable de
 forma razonablemente confiable: el formato es el mismo para todos los emisores, no el
-diseño de cada empresa. Se verificó contra documentos de Banco de Chile, Entel,
-Falabella, una estación de servicio y una consultora: misma plantilla en todos.
+diseño de cada empresa. Se verificó contra documentos de un banco, una empresa de telecomunicaciones,
+un comercio, una estación de servicio y una consultora: misma plantilla en todos.
 
 Cómo se parsea: **por coordenadas, no por texto**. Partir las líneas por espacios no
 sirve — las descripciones tienen espacios y la cantidad puede traer unidad ("38,17 Lt",
@@ -50,6 +50,12 @@ class ItemDTE:
     precio: float | None
     subtotal: float | None
     codigo: str | None = None
+    descuento_pct: float | None = None
+    # Qué se dedujo en vez de leerse del PDF ("cantidad", "precio" o "cantidad y precio"),
+    # para no hacer pasar por dato lo que en realidad es una inferencia.
+    derivado: str | None = None
+    # cantidad x precio (menos descuento) coincide con el subtotal impreso.
+    cuadra: bool = True
 
     def como_dict(self) -> dict:
         return {
@@ -58,6 +64,9 @@ class ItemDTE:
             "precio": self.precio,
             "subtotal": self.subtotal,
             "codigo": self.codigo,
+            "descuento_pct": self.descuento_pct,
+            "derivado": self.derivado,
+            "cuadra": self.cuadra,
         }
 
 
@@ -71,11 +80,17 @@ class DetalleDTE:
 
 
 def _numero(texto: str) -> float | None:
-    """'58.815,13' → 58815.13. Formato chileno: punto de miles, coma decimal."""
+    """'58.815,13' → 58815.13. Formato chileno: punto de miles, coma decimal.
+
+    Rechaza cualquier cosa que tenga letras. Antes se limpiaba a golpe de expresión
+    regular y una unidad de medida como "M3" se convertía en el número 3, que después
+    se tomaba como la cantidad del ítem; la cantidad real quedaba descartada. "UN" y
+    "Lt" no daban problema porque no tienen dígitos, pero "M3" y "M2" sí.
+    """
     if not texto:
         return None
-    limpio = re.sub(r"[^\d,.\-]", "", texto)
-    if not limpio or limpio in ("-", ".", ","):
+    limpio = texto.strip().replace("$", "").replace(" ", "")
+    if not re.fullmatch(r"-?[\d.,]+", limpio):
         return None
     limpio = limpio.replace(".", "").replace(",", ".")
     try:
@@ -147,15 +162,30 @@ def _partir_fila(linea: list[dict], ref: dict[str, float]) -> dict:
         else:
             cola.append(t)
 
-    precio = None
-    for i in range(len(cola) - 1, -1, -1):
-        if _numero(cola[i]) is not None:
-            precio = cola[i]
-            cola = cola[:i]
-            break
+    # La cola se lee de derecha a izquierda: el último número es el precio unitario y
+    # el anterior es la cantidad, salteando la unidad si la hay ("1 UN", "38,17 Lt").
+    #
+    # Antes se tomaba "todo lo que quedaba" como cantidad y se lo unía en un solo número.
+    # Eso rompía cuando un pedazo del código o de la descripción se pasaba de la frontera:
+    # "140" + "2" terminaba siendo una cantidad de 1402 en vez de 2. Ahora lo que sobra a
+    # la izquierda vuelve al texto, que es de donde salió.
+    precio = cantidad = None
+    i = len(cola) - 1
+    while i >= 0 and _numero(cola[i]) is None:
+        i -= 1                      # basura a la derecha del precio (raro, pero barato)
+    if i >= 0:
+        precio = cola[i]
+        i -= 1
+        while i >= 0 and _numero(cola[i]) is None:
+            i -= 1                  # la unidad de medida
+        if i >= 0:
+            cantidad = cola[i]
+            i -= 1
+    sobrante = cola[: i + 1]
+
     return {
-        "texto": " ".join(texto).strip(),
-        "cantidad": " ".join(cola).strip(),
+        "texto": " ".join(texto + sobrante).strip(),
+        "cantidad": cantidad,
         "precio": precio,
         "descuento": descuento,
         "valor": valor,
@@ -220,17 +250,69 @@ def extraer_detalle(pdf_bytes: bytes) -> DetalleDTE:
             descripcion, codigo = codigo, None
 
         detalle.items.append(
-            ItemDTE(
+            _armar_item(
                 desc=descripcion,
+                codigo=codigo,
                 cant=_numero(campos["cantidad"]),
                 precio=_numero(campos["precio"]),
+                descuento=_numero(campos["descuento"]),
                 subtotal=valor,
-                codigo=codigo,
             )
         )
 
     _verificar(detalle)
     return detalle
+
+
+def _armar_item(
+    desc: str,
+    codigo: str | None,
+    cant: float | None,
+    precio: float | None,
+    descuento: float | None,
+    subtotal: float | None,
+) -> ItemDTE:
+    """Completa cantidad y precio unitario y controla que cuadren con el subtotal.
+
+    Hay documentos que no imprimen una de las dos columnas —una póliza de seguro suele
+    traer solo el monto— y ahí el dato se deduce del subtotal, que sí está siempre. Lo
+    deducido queda marcado en `derivado`: es una inferencia razonable, no algo leído del
+    documento, y quien lo consuma tiene que poder distinguirlo.
+
+    El control es `cantidad x precio (menos descuento) = subtotal`. Se tolera un peso o
+    un 1%, porque el SII imprime el subtotal redondeado a pesos mientras que el precio
+    unitario puede traer decimales.
+    """
+    factor = 1 - (descuento / 100) if descuento else 1
+    derivado = None
+
+    if subtotal is not None and factor:
+        if cant is None and precio is None:
+            # Una sola línea de importe: se lee como una unidad a ese precio.
+            cant, precio = 1.0, subtotal / factor
+            derivado = "cantidad y precio"
+        elif cant is None and precio:
+            cant = subtotal / (precio * factor)
+            derivado = "cantidad"
+        elif precio is None and cant:
+            precio = subtotal / (cant * factor)
+            derivado = "precio"
+
+    cuadra = True
+    if cant is not None and precio is not None and subtotal is not None:
+        esperado = cant * precio * factor
+        cuadra = abs(esperado - subtotal) <= max(1.0, abs(subtotal) * 0.01)
+
+    return ItemDTE(
+        desc=desc,
+        cant=cant,
+        precio=precio,
+        subtotal=subtotal,
+        codigo=codigo,
+        descuento_pct=descuento,
+        derivado=derivado,
+        cuadra=cuadra,
+    )
 
 
 def _leer_totales(texto: str, totales: dict[str, float]) -> None:
@@ -257,6 +339,23 @@ def _verificar(detalle: DetalleDTE) -> None:
     if not detalle.items:
         detalle.cuadra = False
         detalle.observacion = "El PDF no tiene filas de ítems reconocibles."
+        return
+
+    descuadrados = [i for i in detalle.items if not i.cuadra]
+    if descuadrados:
+        detalle.cuadra = False
+        cuales = ", ".join(f"{i.desc[:28]!r}" for i in descuadrados[:3])
+        # Causa comprobada mirando varios de estos documentos: el emisor aplicó un
+        # descuento por MONTO, y la representación impresa del SII solo tiene columna
+        # para descuento por PORCENTAJE, así que imprime el precio de lista y el valor
+        # ya rebajado sin mostrar la diferencia. No es un error de lectura ni del
+        # documento; el subtotal es el bueno.
+        detalle.observacion = (
+            f"{len(descuadrados)} de {len(detalle.items)} ítems tienen un precio "
+            f"unitario que no multiplica al subtotal ({cuales}). Suele ser un descuento "
+            "por monto: el PDF del SII muestra el precio de lista y el valor ya "
+            "rebajado, pero no la rebaja. El subtotal es el importe válido."
+        )
         return
 
     suma = sum(i.subtotal or 0 for i in detalle.items)

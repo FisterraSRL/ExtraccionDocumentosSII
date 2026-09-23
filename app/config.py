@@ -22,13 +22,58 @@ class Settings:
     sii_cert_path: str | None = os.getenv("SII_CERT_PATH")
     sii_cert_password: str | None = os.getenv("SII_CERT_PASSWORD")
 
-    # Finnegans
-    finnegans_api_url: str | None = os.getenv("FINNEGANS_API_URL")
-    finnegans_api_key: str | None = os.getenv("FINNEGANS_API_KEY")
+    # Finnegans (Teamplace). El token se pide con client_id + client_secret; no hay
+    # "api key" suelta, por eso la variable vieja quedó sin uso.
+    finnegans_api_url: str = os.getenv("FINNEGANS_API_URL", "https://api.finneg.com/api")
+    finnegans_client_id: str | None = os.getenv("FINNEGANS_CLIENT_ID")
+    finnegans_client_secret: str | None = os.getenv("FINNEGANS_CLIENT_SECRET")
     finnegans_env: str = os.getenv("FINNEGANS_ENV", "sandbox")
+    # Parámetros de imputación. No tienen un valor por defecto sensato: dependen de cómo
+    # esté configurado el ERP de cada empresa, y adivinarlos crearía asientos mal
+    # imputados. El cliente falla con un mensaje claro si faltan.
+    finnegans_workflow: str | None = os.getenv("FINNEGANS_WORKFLOW")
+    # Producto del maestro con el que se cargan las líneas. Los ítems que leemos del PDF
+    # son texto libre del emisor y no tienen código, así que van todos contra un producto
+    # genérico de gastos y la descripción real queda en la línea.
+    finnegans_producto: str | None = os.getenv("FINNEGANS_PRODUCTO")
+    # Empresa de Finnegans contra la que se registran TODOS los documentos, sin importar
+    # de qué empresa del SII sean. Está para las pruebas: con PRUEBA39 los documentos
+    # entran en la empresa de prueba de la instancia y no ensucian la contabilidad real.
+    # Vacío = cada documento va a la empresa de Finnegans cuyo RUT coincide con el de la
+    # empresa del SII, que es el comportamiento definitivo.
+    finnegans_empresa_codigo: str | None = os.getenv("FINNEGANS_EMPRESA_CODIGO")
+    # "PES" y no "CLP": aunque el catálogo tiene CLP, la instancia usa PES como moneda
+    # local (así viene en el documento real y en MonedaPrincipalCodigo de las empresas).
+    finnegans_moneda: str = os.getenv("FINNEGANS_MONEDA", "PES")
+    finnegans_condicion_pago: str = os.getenv("FINNEGANS_CONDICION_PAGO", "30D")
+    # Conceptos del desglose impositivo, tal como aparecen en el documento real.
+    finnegans_concepto_iva: str = os.getenv("FINNEGANS_CONCEPTO_IVA", "COMPRA_IVA_19")
+    finnegans_concepto_exento: str = os.getenv("FINNEGANS_CONCEPTO_EXENTO", "ivacomexe")
 
     # App
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./sii_finnegans.db")
+    # Cuándo se guarda el PDF de cada documento. Pesan ~170 KB y no comprimen, así que
+    # bajarlos todos engorda la base rápido (1.000 documentos ~ 170 MB).
+    #
+    #   demanda        (por defecto) No se bajan al sincronizar. Cuando alguien abre uno,
+    #                  se trae del SII en el momento y queda guardado para la próxima.
+    #                  Solo ocupan espacio los documentos que a alguien le interesaron.
+    #   sincronizacion Se bajan todos durante la sincronización. Aprovecha que el PDF ya
+    #                  se descarga para leer los ítems, pero ocupa mucho más.
+    #   nunca          No se guardan. Se traen del SII cada vez que se los abre.
+    #
+    # Ojo: "demanda" y "nunca" necesitan poder hablar con el SII en el momento, así que
+    # solo sirven donde corre la sincronización. En un despliegue serverless hay que usar
+    # "sincronizacion" o los documentos no tendrán PDF que mostrar.
+    pdf_modo: str = os.getenv("PDF_MODO", "demanda").strip().lower()
+
+    @property
+    def guardar_pdf_al_sincronizar(self) -> bool:
+        return self.pdf_modo == "sincronizacion"
+
+    @property
+    def guardar_pdf_al_verlo(self) -> bool:
+        return self.pdf_modo in ("demanda", "sincronizacion")
 
     def require_sii_credentials(self) -> tuple[str, Path, str]:
         """Valida que haya credenciales del SII configuradas y devuelve (rut, cert_path, password).

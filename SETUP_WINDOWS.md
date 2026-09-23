@@ -24,7 +24,7 @@ Si ya lo tenés clonado, solo entrá a esa carpeta.
 ```powershell
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-sync.txt
 ```
 
 ## 4. Instalar el navegador de Playwright
@@ -41,10 +41,12 @@ playwright install chromium
 copy .env.example .env
 ```
 
+Además del SII, hay que definir el acceso al portal (`PORTAL_USUARIO`, `PORTAL_PASSWORD`, `SECRET_KEY`) y, mientras trabajes en `http://localhost`, `PORTAL_COOKIE_INSEGURA=1` para que la cookie de sesión viaje sin HTTPS.
+
 Editá `.env` con un editor de texto y completá:
 
 ```
-SII_RUT=10.439.188-5
+SII_RUT=XX.XXX.XXX-X
 SII_CERT_PATH=secrets/certificado.pfx
 SII_CERT_PASSWORD=<la contraseña real del .pfx>
 FINNEGANS_API_URL=
@@ -84,7 +86,7 @@ browser.close()
 playwright.stop()
 ```
 
-Con `headless=False` el navegador se abre visible en tu pantalla, así podés confirmar con los ojos si quedó logueado (deberías ver el nombre/RUT del contribuyente, "Alvarez Asociados SpA" o similar). Guardalo como `scripts/probar_login_navegador.py` y corré:
+Con `headless=False` el navegador se abre visible en tu pantalla, así podés confirmar con los ojos si quedó logueado (deberías ver el nombre/RUT del contribuyente, "Empresa de ejemplo" o similar). Guardalo como `scripts/probar_login_navegador.py` y corré:
 
 ```powershell
 python scripts\probar_login_navegador.py

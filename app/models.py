@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy import (
     JSON,
     Boolean,
+    LargeBinary,
     Date,
     DateTime,
     Enum,
@@ -161,11 +162,20 @@ class Documento(Base):
 
     # Notas (motivo de NC/ND) e ítems (desc/cant/precio/subtotal, leídos del PDF del SII)
     motivo: Mapped[str | None] = mapped_column(Text, nullable=True)
-    items: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # none_as_null: sin esto SQLAlchemy guarda Python None como el texto JSON 'null',
+    # no como NULL de SQL, y el filtro `items IS NULL` que usa la sincronización para
+    # saber a qué documentos les falta el desglose dejaría de encontrarlos.
+    items: Mapped[list | None] = mapped_column(JSON(none_as_null=True), nullable=True)
 
     # Identificador del documento en el Portal de Facturación Electrónica, que es de
     # donde sale su PDF. Se guarda para poder volver a pedirlo sin rehacer la búsqueda.
     pdf_codigo: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # El PDF en sí. Se guarda para poder mostrarlo en el portal sin depender de tener
+    # sesión en el SII: en el despliegue en la nube no hay forma de ir a buscarlo, y aun
+    # en local significa no volver a pedírselo al SII cada vez que alguien lo abre.
+    # Pesan ~170 KB cada uno y no comprimen (ya vienen comprimidos), así que el tamaño
+    # de la base crece de forma notoria: se puede apagar con GUARDAR_PDF=0.
+    pdf_contenido: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     # Queda escrito cuando la suma de los ítems no cuadra con los totales del documento
     # (descuentos globales, otros cobros). El desglose se muestra igual, con la salvedad.
     items_observacion: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -188,6 +198,20 @@ class Documento(Base):
     sincronizado_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     @property
+    def tiene_pdf(self) -> bool:
+        """El archivo ya está en la base: se muestra al instante."""
+        return self.pdf_contenido is not None
+
+    @property
+    def pdf_disponible(self) -> bool:
+        """Hay PDF para mostrar, esté guardado o haya que ir a buscarlo al SII.
+
+        Es lo que decide si el portal ofrece el botón. Que esté guardado o no cambia
+        cuánto tarda, no si existe.
+        """
+        return self.pdf_contenido is not None or self.pdf_codigo is not None
+
+    @property
     def tipo_nombre(self) -> str:
         """Nombre legible del tipo; lo consume el portal para no duplicar el catálogo."""
         return nombre_tipo(self.tipo)
@@ -202,6 +226,11 @@ class ItemSchema(BaseModel):
     precio: float | None = None
     subtotal: float | None = None
     codigo: str | None = None
+    descuento_pct: float | None = None
+    # Qué se dedujo del subtotal en vez de leerse del PDF, si algo.
+    derivado: str | None = None
+    # cantidad x precio (menos descuento) coincide con el subtotal impreso.
+    cuadra: bool = True
 
 
 class EmpresaOut(BaseModel):
@@ -247,6 +276,8 @@ class DocumentoOut(BaseModel):
     motivo: str | None = None
     items: list[ItemSchema] | None = None
     items_observacion: str | None = None
+    tiene_pdf: bool = False
+    pdf_disponible: bool = False
     estado: EstadoDocumento
     fecha_envio: datetime | None = None
     finnegans_id: str | None = None
@@ -267,3 +298,25 @@ class EnviarResult(BaseModel):
     estado: EstadoDocumento
     finnegans_id: str | None = None
     error_detalle: str | None = None
+
+
+class EnviarLote(BaseModel):
+    """Los documentos que el usuario marcó en la bandeja.
+
+    El envío es siempre explícito y sobre una selección: nunca se manda una tanda entera
+    por el solo hecho de estar pendiente.
+    """
+
+    ids: list[int]
+
+
+class EnvioLoteResult(BaseModel):
+    enviados: int
+    con_error: int
+    # Ya estaban enviados: no se reintentan para no duplicar el comprobante en el ERP.
+    omitidos: int = 0
+    # Empresa de Finnegans en la que quedaron registrados. Importa decirlo porque
+    # durante las pruebas todos van a una empresa fija (PRUEBA39) y no a la que
+    # corresponde por RUT.
+    empresa_finnegans: str | None = None
+    resultados: list[EnviarResult] = []
