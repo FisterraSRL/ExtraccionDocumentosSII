@@ -2,7 +2,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import Cookie, FastAPI, HTTPException, Response
+from fastapi import Cookie, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -73,11 +73,14 @@ def version():
 
 
 @app.get("/api/sesion")
-def sesion(portal_sesion: str | None = Cookie(default=None)):
+def sesion(request: Request, portal_sesion: str | None = Cookie(default=None)):
     """Le dice al portal si ya hay sesión, para mostrar la bandeja o el formulario."""
+    sin_login = auth.sesion_automatica(request) is not None
     return {
-        "autenticado": auth.sesion_valida(portal_sesion) is not None,
+        "autenticado": sin_login or auth.sesion_valida(portal_sesion) is not None,
         "configurada": auth.auth_configurada(),
+        # El portal usa esto para no mostrar un "Salir" que no podría cerrar nada.
+        "sin_login": sin_login,
     }
 
 

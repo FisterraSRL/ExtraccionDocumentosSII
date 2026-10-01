@@ -604,13 +604,19 @@
 
   function mostrarLogin(mostrar){
     document.getElementById("loginOverlay").hidden = !mostrar;
-    document.getElementById("logoutBtn").hidden = mostrar;
+    document.getElementById("logoutBtn").hidden = mostrar || sinLogin;
     if(mostrar) document.getElementById("loginUsuario").focus();
   }
+
+  // El backend habilitó la entrada directa (solo corre en la propia máquina). No hay
+  // sesión que cerrar, así que tampoco se ofrece "Salir".
+  var sinLogin = false;
 
   function comprobarSesion(){
     return apiFetch("/api/sesion").then(function(r){
       if(!r.ok) return false;
+      sinLogin = !!r.data.sin_login;
+      if(sinLogin) return true;
       if(!r.data.configurada){
         // Sin credenciales configuradas no hay a quién validar. Se avisa en vez de
         // dejar la bandeja abierta o de mostrar un login que nunca aceptaría a nadie.

@@ -494,6 +494,13 @@ de usuarios: es un portal interno.
 - Si faltan esas variables el portal **no se abre**, en vez de quedar accesible.
 - Todo el router de datos exige sesión. Públicos: `/api/version` y `/api/sesion`.
 - `PORTAL_COOKIE_INSEGURA=1` **solo** en desarrollo sobre `http://localhost`.
+- `PORTAL_SIN_LOGIN=1` saltea el login. Para desarrollo: reautenticarse cada 12 horas
+  no protege nada cuando el portal escucha en la propia máquina. `sesion_automatica()`
+  exige **las tres** condiciones y cada una tapa un agujero distinto: la variable
+  activada, que el pedido venga de loopback (se mira `request.client.host`, el socket,
+  no cabeceras que el cliente escribe) y que no estemos en serverless. Dejarla prendida
+  por error no abre el portal publicado. No la aflojes para "probar desde el celular":
+  la bandeja muestra documentos tributarios de clientes.
 
 ---
 

@@ -22,10 +22,23 @@ import json
 import os
 import time
 
-from fastapi import Cookie, HTTPException, Response
+from fastapi import Cookie, HTTPException, Request, Response
 
 COOKIE = "portal_sesion"
 DURACION_SEGUNDOS = 12 * 60 * 60  # una jornada de trabajo
+
+# Entrar sin pasar por el login. Es para el desarrollo local, donde volver a
+# autenticarse cada 12 horas no protege de nada: el portal escucha en la propia
+# máquina. Apagado salvo que se lo pida a propósito, y aun así no alcanza para abrir
+# el portal publicado — ver sesion_automatica().
+SIN_LOGIN = os.getenv("PORTAL_SIN_LOGIN", "").lower() in ("1", "true", "si")
+
+# Con quién se registra la actividad cuando se entró sin login.
+USUARIO_LOCAL = "local"
+
+# El pedido tiene que venir de la propia máquina. Se compara contra el socket, no
+# contra cabeceras como X-Forwarded-For, que las escribe quien llama.
+_LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 class ConfiguracionAuthError(RuntimeError):
@@ -111,9 +124,34 @@ def sesion_valida(valor: str | None) -> str | None:
     return payload.get("u")
 
 
-def requiere_sesion(portal_sesion: str | None = Cookie(default=None)) -> str:
+def sesion_automatica(request: Request) -> str | None:
+    """Usuario con el que entrar sin login, o None si no corresponde.
+
+    Tienen que darse las tres condiciones, y cada una tapa un agujero distinto:
+
+    1. `PORTAL_SIN_LOGIN` activado. Nadie se queda sin login por descuido.
+    2. El pedido viene de la propia máquina. Vale aunque el servidor se levante con
+       `--host 0.0.0.0`: lo que se mira es de dónde vino la conexión.
+    3. No estamos en el despliegue serverless, donde el portal tiene URL pública y
+       muestra documentos tributarios de clientes.
+
+    Con las tres, una variable que se escape al entorno equivocado no abre nada.
+    """
+    if not SIN_LOGIN:
+        return None
+    if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+        return None
+    cliente = getattr(request, "client", None)
+    if cliente is None or cliente.host not in _LOOPBACK:
+        return None
+    return USUARIO_LOCAL
+
+
+def requiere_sesion(
+    request: Request, portal_sesion: str | None = Cookie(default=None)
+) -> str:
     """Dependencia de FastAPI: corta el pedido si no hay sesión iniciada."""
-    usuario = sesion_valida(portal_sesion)
+    usuario = sesion_valida(portal_sesion) or sesion_automatica(request)
     if not usuario:
         raise HTTPException(status_code=401, detail="Hay que iniciar sesión.")
     return usuario
