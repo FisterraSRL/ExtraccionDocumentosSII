@@ -4,7 +4,7 @@ Todo lo que hace falta para seguir trabajando en este repo sin haber visto las
 conversaciones anteriores. Leelo entero antes de tocar código: hay varias trampas que
 cuestan horas si se descubren solas, y están todas anotadas acá abajo.
 
-Última revisión: **23-sep-2026**. Si encontrás algo que ya no es cierto, corregilo en
+Última revisión: **07-oct-2026**. Si encontrás algo que ya no es cierto, corregilo en
 vez de dejarlo: este archivo solo sirve si se puede confiar en él.
 
 ---
@@ -68,12 +68,12 @@ punta, el envío. Es un pedido explícito del dueño del proyecto y no hay que c
   detalle de ítems sale del PDF, no del XML. No vuelvas a intentar este camino sin un
   dato nuevo.
 
-**Nunca se registró un documento en Finnegans.** Hubo un intento el 23-sep-2026 y fue
-rechazado; el mensaje se perdió (ver §12). No hay ningún comprobante creado en el ERP.
+**En la base local no hay documentos marcados como enviados.** Hubo un intento el
+23-sep-2026 que fue rechazado; el mensaje se perdió (ver §12).
 
-**Números de hoy** (base local, para dimensionar): 1.643 documentos, 55 empresas (30 de
-ellas en el Portal FE), 1.288 documentos con desglose de ítems, 137 con alguna
-observación sobre ese desglose. Versión `1.0.2`. Publicación 1.0.2 del 23-sep-2026, con ejemplos anonimizados.
+**Números al 07-oct-2026** (base local, para dimensionar): 2.736 documentos,
+55 empresas, 1.367 documentos con desglose de ítems, 142 con alguna observación
+sobre ese desglose y 2.337 descripciones únicas en el maestro. Versión `1.0.3`.
 
 ---
 
@@ -99,8 +99,11 @@ app/
     pdf_dte.py     Parser por coordenadas del PDF del SII. Ver §7.
   finnegans/
     client.py      Cliente de la API de Finnegans. Ver §8.
+    catalogo.py    Token por perfil y lectura de producto/list.
+  productos.py     Catálogo local, búsqueda y matching de ítems.
   routers/
     documents.py   Todos los /api/* de datos. Exigen sesión.
+    productos.py   Sincronización local y asociaciones por ítem.
   static/
     index.html     El portal ("Bandeja SII"). Ver §9.
 scripts/
@@ -135,6 +138,11 @@ PATCH  /api/empresas/{rut}           nombre manual
 POST   /api/empresas/refrescar
 POST   /api/sync                     empresa, periodo, meses, con_items,
                                      reprocesar_items, descargar_pdf
+GET    /api/productos/estado         cantidad local del perfil activo
+POST   /api/productos/sincronizar    trae producto/list de Finnegans
+GET    /api/productos?q=...          búsqueda local por nombre o código
+POST   /api/documents/{id}/productos/preparar   sugiere y asocia coincidencias claras
+PUT    /api/documents/{id}/items/{indice}/producto  elección o limpieza manual
 ```
 
 ### Cómo correrlo
@@ -385,6 +393,53 @@ Catálogos útiles, todos de solo lectura:
 `WorkflowEntidadAPI/list`. Los de `workflow/list`, `circuito/list` y
 `transaccionSubtipo/list` responden 501: no existen.
 
+**Catálogo de productos (primera versión):** OAuth respondió un token de texto plano y
+`producto/list` devolvió una lista JSON completa, sin paginación visible. La lista trae
+`Codigo`, `Nombre`, `UnidadIDCompra`, `Unidad`, `NombreRubro` y `NombreFamilia`; no trae
+un ID distinto de `Codigo` ni el campo `Activo` (el detalle individual sí lo tiene).
+La copia local se guarda por perfil en `productos_finnegans`. El transporte usa POST
+OAuth con secreto en header, cachea el token por perfil y renueva tras un 401.
+El filtro de fecha documentado oficialmente se llama `desde`, no `updatedSince`; la
+función lo admite, pero la sincronización de la UI todavía hace carga completa.
+Las asociaciones van en `asociaciones_items` por perfil, documento e índice, separadas
+de `Documento.items` porque una sincronización del SII puede reemplazar ese JSON.
+Una coincidencia automática requiere umbral `FINNEGANS_MATCH_UMBRAL` (default 0,86)
+y distancia suficiente frente a la segunda opción. Una limpieza manual deja el ítem
+pendiente y evita que se vuelva a asignar automáticamente.
+Las elecciones manuales existentes son también la memoria: al abrir otro documento,
+`preparar()` consulta las del mismo perfil y proveedor, verifica que el ítem siga
+coincidiendo con la firma guardada y compara descripción normalizada y código SII.
+Una única elección consistente se reutiliza incluso si corrige una sugerencia previa;
+decisiones contradictorias o una limpieza manual impiden seleccionar automáticamente.
+El historial solo contiene decisiones humanas vigentes: no aprende de sus propias
+selecciones automáticas. Las alternativas recordadas aparecen primero en el buscador.
+
+**Maestro de equivalencias:** `GET /equivalencias` abre una página local para revisar
+descripciones únicas del SII. El buscador y la sugerencia están en la misma fila de
+cada descripción; las selecciones se conservan al filtrar o cambiar de página y se
+guardan juntas con el botón al pie de la grilla. `POST /api/equivalencias/lote`
+valida todas las decisiones y las confirma en una sola transacción: un producto
+inválido no deja guardado un lote parcial. Incluye el perfil esperado para impedir
+que un cambio de certificado en otra pestaña aplique decisiones al perfil equivocado.
+`app/equivalencias.py` normaliza sin borrar palabras que
+pueden distinguir presentaciones (por ejemplo, BOLSA), y registra cada aparición con
+clave documento/índice. Por eso una resincronización no infla el conteo. El primer
+`GET /api/equivalencias` incorpora ítems históricos de la base; la sincronización
+registra los nuevos al terminar cada empresa. `productos_sii` guarda original,
+normalizado y frecuencia; `apariciones_productos_sii` une los ítems históricos;
+`equivalencias_productos` guarda la decisión por perfil y referencia el catálogo
+local `productos_finnegans`, sin duplicarlo. Las sugerencias son informativas y
+requieren confirmación: las descripciones ya registradas en el maestro no reciben
+matching automático sin una equivalencia, aunque la memoria manual previa del mismo
+proveedor sigue aplicando. Una equivalencia confirmada se aplica también al cerrar
+la sincronización de cada empresa, sin esperar a que se abra el detalle. Manda sobre
+el matching y la memoria en documentos pendientes; una decisión manual de un ítem manda sobre el
+maestro para ese ítem. Al cambiar el maestro no se reescriben documentos enviados.
+`PUT /api/equivalencias/{id}` permite confirmar, dejar sin equivalencia, deshabilitar
+o devolver a pendiente. Los endpoints del maestro, igual que los de productos, exigen
+sesión y loopback. `producto/list` no expone ID separado: el selector busca por código
+y nombre, y el código es la identidad que usa la API de Finnegans.
+
 ### Lo que falta resolver con el dueño del proyecto
 
 1. Confirmar `WorkflowCodigo` y `ProductoCodigo` (¿uno genérico para todo, o mapeo por
@@ -494,6 +549,21 @@ de usuarios: es un portal interno.
 - Si faltan esas variables el portal **no se abre**, en vez de quedar accesible.
 - Todo el router de datos exige sesión. Públicos: `/api/version` y `/api/sesion`.
 - `PORTAL_COOKIE_INSEGURA=1` **solo** en desarrollo sobre `http://localhost`.
+- `GET /configuracion` permite configurar el certificado SII **solo desde loopback**
+  y con sesión del portal. Valida el `.pfx/.p12` y su contraseña localmente, guarda el
+  archivo en `secrets/` y actualiza las variables SII de `.env` al activar un perfil,
+  sin instalarlo en el almacén del navegador. No habilitar esta ruta fuera de la
+  máquina que sincroniza.
+- La configuración admite varios perfiles de certificado. Cada perfil conserva un
+  `.pfx`, contraseña y opcionalmente `Client_ID` / `Client_Secret` en
+  `secrets/sii_certificados.json`, ignorado por Git. La lista y el detalle solo devuelven
+  indicadores de campos configurados. El botón "Mostrar" permite consultar la contraseña
+  del certificado o `Client_ID`; `Client_Secret` y el token nunca se muestran. El acceso
+  está protegido por sesión y loopback; nunca registrar respuestas con secretos.
+  La sincronización de productos usa las credenciales del perfil activo. El envío de
+  facturas todavía usa las variables globales de `.env` y no consume las nuevas
+  asociaciones. `SIIClient` separa cookies y freno de login por `SII_PERFIL`; no reutilizar
+  sesiones entre perfiles.
 - `PORTAL_SIN_LOGIN=1` saltea el login. Para desarrollo: reautenticarse cada 12 horas
   no protege nada cuando el portal escucha en la propia máquina. `sesion_automatica()`
   exige **las tres** condiciones y cada una tapa un agujero distinto: la variable
@@ -590,15 +660,14 @@ Los técnicos están en su sección; estos son los que no encajan en ninguna:
 2. Confirmar con el dueño `WorkflowCodigo` y `ProductoCodigo`.
 3. Crear en Finnegans los 66 proveedores que faltan.
 4. Pedir los ejemplos de nota de crédito y factura exenta, y validar esos mapeos.
-5. Publicación 1.0.2 del 23-sep-2026: cambios acumulados y ejemplos anonimizados.
-6. Terminar el despliegue en Vercel: Postgres, variables de entorno,
+5. Terminar el despliegue en Vercel: Postgres, variables de entorno,
    `scripts/copiar_a_postgres.py`.
-7. Implementar `get_bhe()`.
-8. Definir el período histórico desde el cual cargar en la primera sincronización.
-9. Gestor de secretos real para el certificado y las credenciales cuando esto viva en la
+6. Implementar `get_bhe()`.
+7. Definir el período histórico desde el cual cargar en la primera sincronización.
+8. Gestor de secretos real para el certificado y las credenciales cuando esto viva en la
    nube. Hoy es un `.env` plano.
-10. Cosmético: el indicador de conexión del portal se queda en "Conectando con el
+9. Cosmético: el indicador de conexión del portal se queda en "Conectando con el
     backend…".
-11. El `README.md` quedó congelado en la etapa de scaffolding y hoy describe mal el
+10. El `README.md` quedó congelado en la etapa de scaffolding y hoy describe mal el
     proyecto (dice que no hay conexión ni al SII ni a Finnegans, y nombra librerías que
     ya no se usan). Está publicado.

@@ -21,12 +21,15 @@ class Settings:
     sii_rut: str | None = os.getenv("SII_RUT")
     sii_cert_path: str | None = os.getenv("SII_CERT_PATH")
     sii_cert_password: str | None = os.getenv("SII_CERT_PASSWORD")
+    sii_perfil: str | None = os.getenv("SII_PERFIL")
 
     # Finnegans (Teamplace). El token se pide con client_id + client_secret; no hay
     # "api key" suelta, por eso la variable vieja quedó sin uso.
     finnegans_api_url: str = os.getenv("FINNEGANS_API_URL", "https://api.finneg.com/api")
     finnegans_client_id: str | None = os.getenv("FINNEGANS_CLIENT_ID")
     finnegans_client_secret: str | None = os.getenv("FINNEGANS_CLIENT_SECRET")
+    # Selección automática conservadora; una segunda opción cercana la bloquea igualmente.
+    finnegans_match_umbral: str = os.getenv("FINNEGANS_MATCH_UMBRAL", "0.86")
     finnegans_env: str = os.getenv("FINNEGANS_ENV", "sandbox")
     # Parámetros de imputación. No tienen un valor por defecto sensato: dependen de cómo
     # esté configurado el ERP de cada empresa, y adivinarlos crearía asientos mal

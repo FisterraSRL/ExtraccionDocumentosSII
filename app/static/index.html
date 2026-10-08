@@ -124,6 +124,7 @@
     font-size:.72rem; font-weight:600; letter-spacing:.06em; color:var(--fs-steel-deep);
     margin-left:10px; align-self:center;
   }
+  .perfil-activo{font-size:.76rem;font-weight:700;letter-spacing:.03em;color:var(--fs-navy);background:#e7eef2;border:1px solid #bdced8;border-radius:var(--fs-radius-pill);padding:5px 11px;align-self:center;white-space:nowrap;}
   .empresa-paso{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
   .paso-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
     border-radius:50%;background:#0A2F43;color:#fff;font-size:.74rem;font-weight:700;flex:none;}
@@ -273,11 +274,33 @@
     font-size:.85rem; color:var(--fs-ink); background:rgba(255,255,255,.6); border:1px solid var(--fs-steel);
     border-radius:10px; padding:9px 13px; font-weight:500;
   }
-  .items-table{width:100%; border-collapse:collapse; font-size:.85rem;}
+  .items-table{width:100%; border-collapse:collapse; table-layout:fixed; font-size:.85rem;}
+  .items-table th:nth-child(1){width:32%;}
+  .items-table th:nth-child(2){width:9%;}
+  .items-table th:nth-child(3){width:14%;}
+  .items-table th:nth-child(4){width:15%;}
+  .items-table th:nth-child(5){width:30%;}
   .items-table th{text-align:left; font-weight:700; color:var(--fs-steel-deep); font-size:.7rem; text-transform:uppercase; letter-spacing:.04em; padding:6px 10px; border-bottom:1.5px solid var(--fs-steel);}
-  .items-table td{padding:7px 10px; border-bottom:1px solid rgba(163,171,182,.35);}
+  tr.detail-row .items-table td{padding:8px 10px; vertical-align:middle; border-bottom:1px solid rgba(163,171,182,.35);}
+  .items-table th:nth-child(5),tr.detail-row .items-table td:nth-child(5){padding-left:24px;}
   .items-table th.num, .items-table td.num{text-align:right;}
   .items-table tfoot td{border-bottom:none; padding-top:8px;}
+  .producto-control{position:relative;min-width:0;width:100%;}
+  .producto-linea{display:flex;align-items:center;gap:5px;max-width:250px;}
+  .producto-seleccion{min-width:0;flex:1;height:29px;padding:0 9px;border:1px solid #d6dee3;border-radius:7px;background:#f8fafb;color:var(--fs-ink);font:600 .72rem Montserrat,sans-serif;text-align:left;cursor:pointer;display:flex;align-items:center;gap:6px;}
+  .producto-seleccion:hover,.producto-seleccion:focus-visible{border-color:#8ea5b4;background:#fff;}
+  .producto-seleccion.sin-producto{font-weight:500;color:var(--fs-steel-deep);}
+  .producto-seleccion.revisar{border-color:#c58b29;}
+  .producto-seleccion .nombre{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .producto-seleccion .flecha{flex:none;font-size:.85rem;color:var(--fs-steel-deep);}
+  .producto-limpiar{flex:none;width:30px;height:30px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--fs-steel-deep);font-size:1.05rem;line-height:1;cursor:pointer;}
+  .producto-limpiar:hover,.producto-limpiar:focus-visible{background:#e3e9ed;color:var(--fs-red-deep);}
+  .producto-panel{position:absolute;top:calc(100% + 4px);left:0;width:min(340px,100%);z-index:20;padding:7px;background:var(--fs-surface-high);border:1px solid var(--fs-steel);border-radius:9px;box-shadow:0 9px 22px #0a2f4326;}
+  .producto-busqueda{width:100%;box-sizing:border-box;border:1px solid var(--fs-steel);border-radius:7px;padding:7px 9px;font:inherit;background:var(--fs-surface-high);}
+  .producto-opciones{max-height:210px;overflow-y:auto;margin-top:5px;}
+  .producto-opciones button{display:block;width:100%;padding:8px 10px;border:0;border-bottom:1px solid #dce4e9;background:transparent;text-align:left;color:var(--fs-ink);font:inherit;cursor:pointer;}
+  .producto-opciones button:hover,.producto-opciones button:focus{background:#e7eef2;}
+  .producto-opciones small{display:block;color:var(--fs-steel-deep);}
   .totals-line{display:flex; justify-content:flex-end; gap:20px; padding-top:6px; font-size:.85rem;}
   .totals-line b{font-variant-numeric:tabular-nums; color:var(--fs-ink);}
   .xml-toggle{align-self:flex-start;}
@@ -327,6 +350,11 @@
   .modal summary{cursor:pointer; font-size:.83rem; font-weight:600; color:var(--fs-steel-deep);}
   .modal summary:hover{color:var(--fs-ink);}
   .modal-nota{margin:8px 0 6px; font-size:.78rem; color:var(--fs-steel-deep);}
+  .certificado-form{display:flex;flex-direction:column;gap:10px;}
+  .certificado-form label{font-size:.76rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--fs-navy);}
+  .certificado-form input,.certificado-form select{width:100%;box-sizing:border-box;margin-top:5px;padding:9px 10px;border:1px solid var(--fs-steel);border-radius:8px;font:inherit;}
+  .certificado-estado{font-size:.82rem;padding:10px 12px;border-radius:9px;background:rgba(10,47,67,.07);line-height:1.4;}
+  .gear-btn{margin-left:auto;font-size:1.15rem;line-height:1;padding:.42em .55em;}
 
   /* ---------- Toast ---------- */
   .toast{
@@ -371,7 +399,10 @@
   <div class="header-row">
     <span class="section-pill">Documentos SII</span>
     <span class="app-version" id="appVersion" title="Versión del portal"></span>
+    <span class="perfil-activo" id="perfilActivo" hidden title="Certificado SII activo"></span>
+    <a class="link-btn" href="/equivalencias" title="Administrar equivalencias de productos">Equivalencias</a>
     <button class="link-btn cerrar-sesion" id="logoutBtn" type="button" hidden>Salir</button>
+    <button class="link-btn gear-btn" id="certificadosBtn" type="button" title="Configurar certificados SII" aria-label="Configurar certificados SII">⚙</button>
     <svg class="lockup" viewBox="0 0 520 100" role="img" aria-label="Fisterra">
       <title>Fisterra</title>
       <g transform="translate(0,4) scale(0.92)">
@@ -519,6 +550,32 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="certificadosOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="certificadosTitle">
+    <h2 id="certificadosTitle">Certificados digitales SII</h2>
+    <p class="modal-nota">El certificado activo se usa en la próxima sincronización. Cada perfil conserva sus cookies del SII por separado.</p>
+    <div class="certificado-estado" id="certificadosEstado">Cargando certificados…</div>
+    <label class="certificado-form">Certificado activo
+      <select id="perfilCertificado"></select>
+    </label>
+    <button class="btn btn-ghost" id="usarCertificadoBtn" type="button">Usar este certificado</button>
+    <div class="certificado-estado" id="productosEstado">Consultando productos de Finnegans…</div>
+    <button class="btn btn-ghost" id="sincronizarProductosBtn" type="button">Sincronizar productos de Finnegans</button>
+    <details>
+      <summary>Agregar otro certificado</summary>
+      <form class="certificado-form" id="certificadoForm">
+        <label>Nombre para identificarlo<input id="certificadoNombre" required placeholder="Ej.: Administración"></label>
+        <label>RUT del titular<input id="certificadoRut" required placeholder="12345678-9"></label>
+        <label>Archivo .pfx o .p12<input id="certificadoArchivo" type="file" accept=".pfx,.p12,application/x-pkcs12" required></label>
+        <label>Contraseña<input id="certificadoPassword" type="password" required autocomplete="new-password"></label>
+        <button class="btn btn-cta" id="guardarCertificadoBtn" type="submit">Guardar y usar certificado</button>
+      </form>
+    </details>
+    <div class="modal-error" id="certificadosError" hidden></div>
+    <div class="modal-actions"><a class="link-btn" href="/configuracion">Abrir configuración</a><button class="btn btn-ghost" id="certificadosCerrarBtn" type="button">Cerrar</button></div>
+  </div>
+</div>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -545,6 +602,8 @@
   }
 
   var docs = [];
+  var asociacionesCache = new Map();
+  var asociacionesCargando = new Set();
   var selected = new Set();
   var expanded = new Set();
   var filters = { estado:"todos", tipo:"todos", q:"" };
@@ -574,6 +633,85 @@
         return { ok: res.ok, status: res.status, data: data };
       });
     });
+  }
+
+  function cerrarCertificados(){ document.getElementById("certificadosOverlay").hidden = true; }
+
+  function mostrarErrorCertificados(texto){
+    var caja = document.getElementById("certificadosError");
+    caja.textContent = texto || "";
+    caja.hidden = !texto;
+  }
+
+  function mostrarEstadoCertificados(datos){
+    var selector = document.getElementById("perfilCertificado");
+    selector.innerHTML = "";
+    (datos.perfiles || []).forEach(function(perfil){
+      var opcion = document.createElement("option");
+      opcion.value = perfil.id;
+      opcion.textContent = perfil.nombre + " · " + perfil.rut +
+        (perfil.certificado_configurado ? "" : " (archivo no disponible)");
+      opcion.selected = perfil.id === datos.activo;
+      selector.appendChild(opcion);
+    });
+    document.getElementById("certificadosEstado").textContent = datos.activo
+      ? "Activo: " + datos.activo + ". El certificado se guarda solo en esta computadora."
+      : "Todavía no hay certificados configurados.";
+    document.getElementById("usarCertificadoBtn").disabled = !datos.activo;
+  }
+
+  function cargarCertificados(){
+    document.getElementById("certificadosEstado").textContent = "Cargando certificados…";
+    mostrarErrorCertificados("");
+    return apiFetch("/api/configuracion/sii", {cache:"no-store"}).then(function(r){
+      if(!r.ok) throw new Error(r.data.detail || "No se pudo consultar los certificados.");
+      mostrarEstadoCertificados(r.data);
+      return r.data;
+    }).catch(function(error){
+      mostrarErrorCertificados(error.message || "No se pudo consultar los certificados.");
+    });
+  }
+
+  function cambiarCertificado(datos){
+    return apiFetch("/api/configuracion/sii/seleccionar", {
+      method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(datos)
+    }).then(function(r){
+      if(!r.ok) throw new Error(r.data.detail || "No se pudo cambiar el certificado.");
+      mostrarEstadoCertificados(r.data);
+      cargarPerfilActivo();
+      asociacionesCache.clear();
+      cargarEstadoProductos();
+      empresaActual = "";
+      try { localStorage.removeItem("empresaActual"); } catch(err){}
+      return loadEmpresas().then(limpiarTableros);
+    });
+  }
+
+  function cargarEstadoProductos(){
+    return apiFetch("/api/productos/estado", {cache:"no-store"}).then(function(r){
+      var caja = document.getElementById("productosEstado");
+      caja.textContent = r.ok
+        ? (r.data.cantidad + " productos guardados para el certificado activo" +
+           (r.data.ultima_sincronizacion ? "." : ". Sincronizá el catálogo para empezar."))
+        : (r.data.detail || "No se pudo consultar el catálogo de productos.");
+    });
+  }
+
+  function sincronizarProductos(){
+    var boton = document.getElementById("sincronizarProductosBtn");
+    var caja = document.getElementById("productosEstado");
+    boton.disabled = true;
+    caja.textContent = "Trayendo productos de Finnegans…";
+    apiFetch("/api/productos/sincronizar", {method:"POST"}).then(function(r){
+      if(!r.ok) throw new Error(r.data.detail || "No se pudo sincronizar productos.");
+      asociacionesCache.clear();
+      caja.textContent = r.data.cantidad + " productos guardados para el certificado activo.";
+      showToast("Catálogo de productos actualizado.");
+      renderTable();
+    }).catch(function(error){
+      caja.textContent = error.message || "No se pudo sincronizar productos.";
+      showToast(caja.textContent, true);
+    }).finally(function(){ boton.disabled = false; });
   }
 
   function setConnStatus(state, text){
@@ -637,6 +775,7 @@
       if(!hay){ mostrarLogin(true); return; }
       mostrarLogin(false);
       loadVersion();
+      cargarPerfilActivo();
       return loadEmpresas().then(limpiarTableros);
     });
   }
@@ -647,6 +786,15 @@
         document.getElementById("appVersion").textContent = "v" + r.data.version;
       }
     }).catch(function(){ /* sin versión visible no se rompe nada */ });
+  }
+
+  function cargarPerfilActivo(){
+    return apiFetch("/api/configuracion/sii", {cache:"no-store"}).then(function(r){
+      var etiqueta = document.getElementById("perfilActivo");
+      if(!r.ok || !r.data.nombre_activo){ etiqueta.hidden = true; return; }
+      etiqueta.textContent = "SII: " + r.data.nombre_activo;
+      etiqueta.hidden = false;
+    }).catch(function(){ document.getElementById("perfilActivo").hidden = true; });
   }
 
   function loadEmpresas(){
@@ -700,6 +848,7 @@
 
   function loadDocuments(){
     loading = true;
+    asociacionesCache.clear();
     renderAll();
     var url = "/api/documents" + (empresaActual ? "?empresa=" + encodeURIComponent(empresaActual) : "");
     return apiFetch(url).then(function(r){
@@ -804,7 +953,7 @@
 
   function itemsTableHtml(doc){
     var items = doc.items || [];
-    var rows = items.map(function(it){
+    var rows = items.map(function(it, indice){
       var cant = (it.cant === null || it.cant === undefined)
         ? "—" : String(it.cant).replace(".", ",");
       var desc = esc(it.desc || "");
@@ -825,7 +974,9 @@
       return "<tr" + (it.cuadra === false ? " class=\"item-descuadre\"" : "") + "><td>" + desc +
         "</td><td class=\"num mono\">" + cant +
         "</td><td class=\"num mono\">" + fmtCLP(it.precio) + descPct +
-        "</td><td class=\"num mono\">" + fmtCLP(it.subtotal) + "</td></tr>";
+        "</td><td class=\"num mono\">" + fmtCLP(it.subtotal) +
+        "</td><td><div class=\"producto-control\" data-prod-indice=\"" + indice +
+        "\"><span class=\"muted small\">Cargando productos…</span></div></td></tr>";
     }).join("");
     var totalsHtml = "";
     if(doc.neto !== null && doc.neto !== undefined){
@@ -846,12 +997,90 @@
         esc(doc.tipo_doc_ref || "?") + ", folio " + esc(doc.folio_doc_ref) + ".</div>";
     }
     var itemsHtml = items.length
-      ? "<table class=\"items-table\"><thead><tr><th>Descripción</th><th class=\"num\">Cant.</th><th class=\"num\">Precio unit.</th><th class=\"num\">Subtotal</th></tr></thead><tbody>" + rows + "</tbody></table>" + totalsHtml
+      ? "<table class=\"items-table\"><thead><tr><th>Descripción</th><th class=\"num\">Cant.</th><th class=\"num\">Precio unit.</th><th class=\"num\">Subtotal</th><th>Producto Finnegans</th></tr></thead><tbody>" + rows + "</tbody></table>" + totalsHtml
       : "<div class=\"detail-note\">Sin detalle de ítems. El Registro de Compras y Ventas solo entrega la cabecera; el desglose sale de la representación impresa del documento en el Portal de Facturación Electrónica, y ahí este documento no aparece.</div>" + totalsHtml;
     if(doc.items_observacion){
       itemsHtml += "<div class=\"detail-warn\">" + esc(doc.items_observacion) + "</div>";
     }
     return noteHtml + itemsHtml + pdfHtml(doc);
+  }
+
+  function opcionesProductoHtml(id, indice, opciones){
+    if(!opciones.length) return "<div class=\"muted small\" style=\"padding:9px\">Sin coincidencias. Buscá con otras palabras o por código.</div>";
+    return opciones.map(function(producto){
+      return "<button type=\"button\" data-action=\"elegir-producto\" data-id=\"" + id +
+        "\" data-indice=\"" + indice + "\" data-codigo=\"" + esc(producto.codigo) + "\">" +
+        esc(producto.nombre) + "<small>" + esc(producto.codigo) +
+        (producto.memoria ? " · Elegido antes" + (producto.memoria > 1 ? " (" + producto.memoria + ")" : "") :
+          producto.puntaje != null ? " · " + Math.round(producto.puntaje * 100) + "% de coincidencia" : "") +
+        "</small></button>";
+    }).join("");
+  }
+
+  function mostrarOpcionesProducto(control, id, indice, opciones){
+    var caja = control.querySelector(".producto-opciones");
+    if(!caja) return;
+    caja.innerHTML = opcionesProductoHtml(id, indice, opciones);
+    caja.hidden = false;
+  }
+
+  function pintarAsociaciones(id){
+    var datos = asociacionesCache.get(id);
+    var fila = tbody.querySelector('[data-detail="' + id + '"]');
+    if(!datos || !fila) return;
+    datos.items.forEach(function(item){
+      var control = fila.querySelector('[data-prod-indice="' + item.indice + '"]');
+      if(!control) return;
+      var producto = item.producto;
+      var sinCatalogo = !datos.catalogo.cantidad;
+      var nombre = producto ? producto.nombre :
+        (sinCatalogo ? "Sincronizá productos desde ⚙" : "Seleccionar producto");
+      var titulo = producto ? producto.nombre + " (" + producto.codigo + ")" : nombre;
+      if(item.estado === "revisar") titulo += " · Ya no figura en el catálogo actual";
+      control.innerHTML =
+        "<div class=\"producto-linea\"><button class=\"producto-seleccion" +
+          (producto ? "" : " sin-producto") + (item.estado === "revisar" ? " revisar" : "") +
+          "\" type=\"button\" data-action=\"abrir-producto\" data-id=\"" + id +
+          "\" data-indice=\"" + item.indice + "\" title=\"" + esc(titulo) +
+          "\" aria-label=\"Producto Finnegans del ítem " + (item.indice + 1) +
+          ": " + esc(nombre) + "\"" + (sinCatalogo ? " disabled" : "") +
+          "><span class=\"nombre\">" + esc(nombre) +
+          "</span><span class=\"flecha\" aria-hidden=\"true\">⌄</span></button>" +
+          (producto ? "<button class=\"producto-limpiar\" type=\"button\" data-action=\"limpiar-producto\" data-id=\"" +
+            id + "\" data-indice=\"" + item.indice +
+            "\" title=\"Quitar producto\" aria-label=\"Quitar producto del ítem " +
+            (item.indice + 1) + "\">×</button>" : "") + "</div>" +
+        "<div class=\"producto-panel\" hidden><input class=\"producto-busqueda\" type=\"search\" data-action=\"buscar-producto\" data-id=\"" +
+          id + "\" data-indice=\"" + item.indice +
+          "\" placeholder=\"Buscar por nombre o código\" aria-label=\"Buscar producto Finnegans para ítem " +
+          (item.indice + 1) + "\"><div class=\"producto-opciones\" hidden></div></div>";
+    });
+  }
+
+  function abrirSelectorProducto(control){
+    var panel = control.querySelector(".producto-panel");
+    var abrir = panel.hidden;
+    tbody.querySelectorAll(".producto-panel").forEach(function(otro){ otro.hidden = true; });
+    panel.hidden = !abrir;
+    if(abrir) panel.querySelector(".producto-busqueda").focus();
+  }
+
+  function cargarAsociaciones(id){
+    var doc = docs.find(function(d){ return d.id === id; });
+    if(!doc || !(doc.items || []).length) return Promise.resolve();
+    if(asociacionesCache.has(id)){ pintarAsociaciones(id); return Promise.resolve(); }
+    if(asociacionesCargando.has(id)) return Promise.resolve();
+    asociacionesCargando.add(id);
+    return apiFetch("/api/documents/" + id + "/productos/preparar", {method:"POST"}).then(function(r){
+      if(!r.ok) throw new Error(r.data.detail || "No se pudieron cargar los productos.");
+      asociacionesCache.set(id, r.data);
+      pintarAsociaciones(id);
+    }).catch(function(error){
+      var fila = tbody.querySelector('[data-detail="' + id + '"]');
+      if(fila) fila.querySelectorAll(".producto-control").forEach(function(control){
+        control.textContent = error.message || "No se pudieron cargar los productos.";
+      });
+    }).finally(function(){ asociacionesCargando.delete(id); });
   }
 
   function bheDetailHtml(doc){
@@ -933,6 +1162,7 @@
     tbody.innerHTML = html;
     renderBulkBar();
     renderEnvioPie();
+    expanded.forEach(cargarAsociaciones);
   }
 
   // Documentos marcados que todavia se pueden mandar, en el orden en que se ven.
@@ -1183,6 +1413,46 @@
     document.getElementById("modalOverlay").hidden = true;
   }
 
+  function guardarProductoItem(id, indice, codigo){
+    apiFetch("/api/documents/" + id + "/items/" + indice + "/producto", {
+      method:"PUT", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({codigo:codigo})
+    }).then(function(r){
+      if(!r.ok) throw new Error(r.data.detail || "No se pudo guardar el producto.");
+      var documento = docs.find(function(d){ return d.id === id; });
+      // Las elecciones de este proveedor pueden modificar otros ítems ya desplegados.
+      var relacionados = docs.filter(function(otro){
+        return documento && otro.proveedor_rut === documento.proveedor_rut && (otro.items || []).length;
+      });
+      relacionados.forEach(function(otro){
+        asociacionesCache.delete(otro.id);
+      });
+      relacionados.filter(function(otro){ return expanded.has(otro.id); })
+        .reduce(function(cadena, otro){
+          return cadena.then(function(){ return cargarAsociaciones(otro.id); });
+        }, Promise.resolve());
+      showToast(codigo ? "Producto seleccionado." : "Producto quitado.");
+    }).catch(function(error){ showToast(error.message, true); });
+  }
+
+  function buscarDesdeControl(entrada){
+    var id = parseInt(entrada.dataset.id, 10);
+    var indice = parseInt(entrada.dataset.indice, 10);
+    var control = entrada.closest(".producto-control");
+    var texto = entrada.value.trim();
+    if(!texto){
+      var datos = asociacionesCache.get(id);
+      mostrarOpcionesProducto(control, id, indice,
+        datos && datos.items[indice] ? datos.items[indice].sugerencias : []);
+      return;
+    }
+    apiFetch("/api/productos?q=" + encodeURIComponent(texto) + "&limite=8").then(function(r){
+      if(!entrada.isConnected || entrada.value.trim() !== texto) return;
+      if(!r.ok) throw new Error(r.data.detail || "No se pudo buscar productos.");
+      mostrarOpcionesProducto(control, id, indice, r.data.productos || []);
+    }).catch(function(error){ showToast(error.message, true); });
+  }
+
   // ---------- Eventos ----------
 
   tbody.addEventListener("click", function(e){
@@ -1194,6 +1464,13 @@
     if(action === "toggle"){
       if(expanded.has(id)) expanded.delete(id); else expanded.add(id);
       renderTable();
+    } else if(action === "abrir-producto"){
+      abrirSelectorProducto(btn.closest(".producto-control"));
+    } else if(action === "elegir-producto"){
+      btn.closest(".producto-panel").hidden = true;
+      guardarProductoItem(id, parseInt(btn.dataset.indice, 10), btn.dataset.codigo);
+    } else if(action === "limpiar-producto"){
+      guardarProductoItem(id, parseInt(btn.dataset.indice, 10), null);
     } else if(action === "ver-pdf"){
       var visor = document.getElementById("pdfVisor-" + id);
       if(visor.hasAttribute("hidden")){
@@ -1225,6 +1502,25 @@
       if(el.checked) selected.add(id); else selected.delete(id);
       renderTable();
     }
+  });
+  tbody.addEventListener("focusin", function(e){
+    if(e.target.matches('[data-action="buscar-producto"]')) buscarDesdeControl(e.target);
+  });
+  tbody.addEventListener("input", function(e){
+    if(!e.target.matches('[data-action="buscar-producto"]')) return;
+    var entrada = e.target;
+    clearTimeout(entrada._esperaProducto);
+    entrada._esperaProducto = setTimeout(function(){ buscarDesdeControl(entrada); }, 220);
+  });
+  tbody.addEventListener("focusout", function(e){
+    var control = e.target.closest(".producto-control");
+    if(!control) return;
+    setTimeout(function(){
+      if(control && !control.contains(document.activeElement)){
+        var panel = control.querySelector(".producto-panel");
+        if(panel) panel.hidden = true;
+      }
+    }, 180);
   });
 
   document.getElementById("selectAll").addEventListener("change", function(e){
@@ -1300,6 +1596,56 @@
     });
   });
 
+  document.getElementById("certificadosBtn").addEventListener("click", function(){
+    document.getElementById("certificadosOverlay").hidden = false;
+    cargarCertificados();
+    cargarEstadoProductos();
+  });
+  document.getElementById("sincronizarProductosBtn").addEventListener("click", sincronizarProductos);
+  document.getElementById("certificadosCerrarBtn").addEventListener("click", cerrarCertificados);
+  document.getElementById("certificadosOverlay").addEventListener("click", function(e){
+    if(e.target.id === "certificadosOverlay") cerrarCertificados();
+  });
+  document.getElementById("usarCertificadoBtn").addEventListener("click", function(){
+    var boton = this;
+    boton.disabled = true;
+    mostrarErrorCertificados("");
+    cambiarCertificado({perfil: document.getElementById("perfilCertificado").value})
+      .then(function(){ showToast("Certificado activo actualizado."); cerrarCertificados(); })
+      .catch(function(error){ mostrarErrorCertificados(error.message); })
+      .finally(function(){ boton.disabled = false; });
+  });
+  document.getElementById("certificadoForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    var boton = document.getElementById("guardarCertificadoBtn");
+    var archivo = document.getElementById("certificadoArchivo").files[0];
+    boton.disabled = true;
+    mostrarErrorCertificados("");
+    archivo.arrayBuffer().then(function(buffer){
+      var bytes = new Uint8Array(buffer), texto = "";
+      for(var i = 0; i < bytes.length; i += 8192){ texto += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192)); }
+      return apiFetch("/api/configuracion/sii", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          nombre: document.getElementById("certificadoNombre").value,
+          rut: document.getElementById("certificadoRut").value,
+          password: document.getElementById("certificadoPassword").value,
+          certificado_b64: btoa(texto)
+        })
+      });
+    }).then(function(r){
+      if(!r.ok) throw new Error(r.data.detail || "No se pudo guardar el certificado.");
+      mostrarEstadoCertificados(r.data);
+      cargarPerfilActivo();
+      document.getElementById("certificadoForm").reset();
+      empresaActual = "";
+      try { localStorage.removeItem("empresaActual"); } catch(err){}
+      return loadEmpresas().then(limpiarTableros);
+    }).then(function(){ showToast("Certificado agregado y seleccionado."); cerrarCertificados(); })
+      .catch(function(error){ mostrarErrorCertificados(error.message || "No se pudo guardar el certificado."); })
+      .finally(function(){ boton.disabled = false; });
+  });
+
   document.getElementById("empresaSelect").addEventListener("change", function(e){
     empresaActual = e.target.value;
     try { localStorage.setItem("empresaActual", empresaActual); } catch(err){}
@@ -1349,6 +1695,7 @@
   });
   document.addEventListener("keydown", function(e){
     if(e.key !== "Escape") return;
+    if(!document.getElementById("certificadosOverlay").hidden) cerrarCertificados();
     if(!document.getElementById("confirmOverlay").hidden) cerrarConfirmacion();
     if(!document.getElementById("modalOverlay").hidden) closeErrorModal();
   });

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import tempfile
 import time
@@ -136,7 +137,7 @@ class ConnectionTestResult:
 
 
 class SIIClient:
-    def __init__(self, rut: str, cert_path: Path | str, cert_password: str):
+    def __init__(self, rut: str, cert_path: Path | str, cert_password: str, perfil: str | None = None):
         self.rut = rut
         self.cert_path = Path(cert_path)
         self._cert_password = cert_password
@@ -145,6 +146,12 @@ class SIIClient:
         self.nombre_empresa: str | None = None
         self._cert_pem_file: Path | None = None
         self._key_pem_file: Path | None = None
+        # Cada certificado tiene cookies y freno de login propios. Sin esta separación,
+        # cambiar de perfil podría reutilizar la sesión de otro titular ante el SII.
+        nombre_perfil = re.sub(r"[^a-z0-9_-]", "", (perfil or os.getenv("SII_PERFIL") or "actual").lower())
+        self.perfil = nombre_perfil or "actual"
+        self.archivo_cookies = DIR_ESTADO / f"sii_sesion_{self.perfil}.json"
+        self.archivo_estado = DIR_ESTADO / f"sii_estado_{self.perfil}.json"
 
     # ---------- Certificado ----------
 
@@ -245,18 +252,16 @@ class SIIClient:
 
     # ---------- Reuso de sesión: la defensa contra el bloqueo del SII ----------
 
-    @staticmethod
-    def _leer_estado() -> dict:
+    def _leer_estado(self) -> dict:
         try:
-            return json.loads(ARCHIVO_ESTADO.read_text(encoding="utf-8"))
+            return json.loads(self.archivo_estado.read_text(encoding="utf-8"))
         except Exception:
             return {}
 
-    @staticmethod
-    def _escribir_estado(estado: dict) -> None:
+    def _escribir_estado(self, estado: dict) -> None:
         try:
             DIR_ESTADO.mkdir(parents=True, exist_ok=True)
-            ARCHIVO_ESTADO.write_text(json.dumps(estado), encoding="utf-8")
+            self.archivo_estado.write_text(json.dumps(estado), encoding="utf-8")
         except Exception:
             # Que no se pueda guardar el estado no debe impedir trabajar; solo se pierde
             # la protección contra logins seguidos.
@@ -341,11 +346,11 @@ class SIIClient:
         """
         from playwright.sync_api import sync_playwright  # import diferido: dependencia pesada
 
-        if not forzar_login and ARCHIVO_COOKIES.is_file():
+        if not forzar_login and self.archivo_cookies.is_file():
             playwright = sync_playwright().start()
             browser = playwright.chromium.launch(headless=headless)
             try:
-                context = browser.new_context(storage_state=str(ARCHIVO_COOKIES))
+                context = browser.new_context(storage_state=str(self.archivo_cookies))
                 page = context.new_page()
                 page.on("dialog", lambda dialogo: dialogo.accept())
                 if self._sesion_viva(page):
@@ -373,11 +378,10 @@ class SIIClient:
         self._guardar_cookies(session[1])
         return session
 
-    @staticmethod
-    def _guardar_cookies(context) -> None:
+    def _guardar_cookies(self, context) -> None:
         try:
             DIR_ESTADO.mkdir(parents=True, exist_ok=True)
-            context.storage_state(path=str(ARCHIVO_COOKIES))
+            context.storage_state(path=str(self.archivo_cookies))
         except Exception:
             pass
 

@@ -355,6 +355,12 @@ def sincronizar(
                         reprocesar=reprocesar_items,
                         descargar_pdf=descargar_pdf,
                     )
+                    # El registro es local e idempotente: no provoca más consultas al SII.
+                    from app.equivalencias import aplicar_confirmadas, registrar_documentos
+                    db.flush()
+                    registrar_documentos(db, rut_objetivo)
+                    if settings.sii_perfil:
+                        aplicar_confirmadas(db, settings.sii_perfil, rut_objetivo)
                 # Se confirma empresa por empresa: si el SII falla en la quinta, las
                 # cuatro anteriores ya quedaron guardadas en vez de perderse.
                 db.commit()

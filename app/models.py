@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Float,
+    ForeignKey,
     Integer,
     String,
     Text,
@@ -215,6 +216,99 @@ class Documento(Base):
     def tipo_nombre(self) -> str:
         """Nombre legible del tipo; lo consume el portal para no duplicar el catálogo."""
         return nombre_tipo(self.tipo)
+
+
+class ProductoFinnegans(Base):
+    """Copia local del catálogo; el código identifica al producto en la API de Finnegans."""
+
+    __tablename__ = "productos_finnegans"
+
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    codigo: Mapped[str] = mapped_column(String(200), primary_key=True)
+    nombre: Mapped[str] = mapped_column(Text, nullable=False)
+    unidad_id_compra: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    unidad: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    rubro: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    familia: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # producto/list no devuelve Activo. No se inventa un estado a partir del listado.
+    activo: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    disponible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    actualizado_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class SincronizacionProductos(Base):
+    __tablename__ = "sincronizaciones_productos"
+
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    fecha: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    cantidad: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class AsociacionItem(Base):
+    """Elección de producto separada del JSON del SII, que una sincronización puede releer."""
+
+    __tablename__ = "asociaciones_items"
+
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    documento_id: Mapped[int] = mapped_column(ForeignKey("documentos.id"), primary_key=True)
+    indice: Mapped[int] = mapped_column(Integer, primary_key=True)
+    descripcion_firma: Mapped[str] = mapped_column(Text, nullable=False)
+    producto_codigo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    origen: Mapped[str] = mapped_column(String(20), nullable=False)
+    puntaje: Mapped[float | None] = mapped_column(Float, nullable=True)
+    actualizado_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProductoSII(Base):
+    """Descripción única del SII; el texto original se conserva para consulta."""
+
+    __tablename__ = "productos_sii"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    descripcion_original: Mapped[str] = mapped_column(Text, nullable=False)
+    descripcion_normalizada: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    apariciones: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    primera_aparicion: Mapped[date | None] = mapped_column(Date, nullable=True)
+    ultima_aparicion: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class AparicionProductoSII(Base):
+    """Cada ítem se cuenta una sola vez aunque el documento se sincronice otra vez."""
+
+    __tablename__ = "apariciones_productos_sii"
+    documento_id: Mapped[int] = mapped_column(ForeignKey("documentos.id"), primary_key=True)
+    indice: Mapped[int] = mapped_column(Integer, primary_key=True)
+    producto_sii_id: Mapped[int] = mapped_column(ForeignKey("productos_sii.id"), nullable=False, index=True)
+
+
+class EquivalenciaProducto(Base):
+    """Decisión vigente por perfil; no modifica las asociaciones de documentos enviados."""
+
+    __tablename__ = "equivalencias_productos"
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    producto_sii_id: Mapped[int] = mapped_column(ForeignKey("productos_sii.id"), primary_key=True)
+    producto_codigo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    estado: Mapped[str] = mapped_column(String(24), nullable=False)
+    origen: Mapped[str] = mapped_column(String(24), nullable=False, default="manual")
+    actualizado_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class EstadoMaestro(Base):
+    """Marca la incorporación inicial de los ítems anteriores a este maestro."""
+
+    __tablename__ = "estado_maestro"
+    clave: Mapped[str] = mapped_column(String(40), primary_key=True)
+    fecha: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class SugerenciaProducto(Base):
+    """Resultado reproducible del matching para el catálogo vigente del perfil."""
+
+    __tablename__ = "sugerencias_productos"
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    producto_sii_id: Mapped[int] = mapped_column(ForeignKey("productos_sii.id"), primary_key=True)
+    producto_codigo: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    puntaje: Mapped[float | None] = mapped_column(Float, nullable=True)
+    catalogo_fecha: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 # ---------- Esquemas Pydantic (API) ----------

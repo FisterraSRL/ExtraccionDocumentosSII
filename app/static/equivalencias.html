@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Equivalencias de productos · Fisterra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{font-family:Montserrat,'Segoe UI',sans-serif;color:#0a2f43;background:#eef0f2}*{box-sizing:border-box}[hidden]{display:none!important}
+body{margin:0}button,input,select{font:inherit}button{cursor:pointer}a{color:#0a2f43;font-weight:700}
+.wrap{max-width:1480px;margin:auto;padding:28px 28px 70px}.top{display:flex;align-items:center;gap:20px;flex-wrap:wrap}.pill{background:#0a2f43;color:#fff;padding:9px 16px;border-radius:30px;font-size:.75rem;text-transform:uppercase;letter-spacing:.08em}.top a{margin-left:auto;font-size:.82rem}
+h1{font-size:clamp(2rem,4vw,3.5rem);line-height:1.1;margin:30px 0 4px;color:#f52125}h1 span{display:block;color:#0a2f43;font-weight:400}.sub{color:#637b89;max-width:760px;line-height:1.55;margin:10px 0 25px}
+.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:22px 0}.toolbar input,.toolbar select,.busqueda-producto{border:1px solid #b8c6ce;background:#f8f9fa;border-radius:9px;padding:10px 12px;color:#0a2f43;outline-color:#0a2f43}.toolbar input{width:min(420px,100%);flex:1}.toolbar select{min-width:170px}.resumen{font-size:.8rem;color:#536c7a;font-weight:600;margin-left:auto}
+.panel{background:#f5f6f7;border:1px solid #d6dfe4;border-radius:17px;box-shadow:0 8px 25px #0a2f430c;overflow:hidden}.tablewrap{overflow:auto;max-height:74vh}.tabla{width:100%;border-collapse:collapse;text-align:left;min-width:950px;table-layout:fixed}.tabla th{position:sticky;top:0;z-index:2;background:#e8edf0;color:#5f7888;text-transform:uppercase;letter-spacing:.05em;font-size:.68rem;padding:13px}.tabla td{border-top:1px solid #dce3e8;padding:13px;vertical-align:top;font-size:.82rem}.tabla tbody tr:hover{background:#edf1f3}.tabla small{display:block;color:#708595;margin-top:5px;line-height:1.35}.tabla .numero{text-align:right;white-space:nowrap}.descripcion{overflow-wrap:anywhere;line-height:1.45}.producto-celda{min-width:0}.producto-actual{font-weight:700;line-height:1.35;overflow-wrap:anywhere;min-height:18px}.producto-actual.vacio{font-weight:500;color:#7c8d98}.edicion{display:flex;gap:7px;align-items:center;margin-top:8px}.busqueda-producto{width:100%;min-width:0;background:#fff;font-size:.75rem;padding:8px 10px}.opciones{border:1px solid #b8c6ce;background:#fff;border-radius:9px;max-height:210px;overflow:auto;margin-top:4px;box-shadow:0 8px 18px #0a2f4315}.opciones button{display:block;width:100%;background:#fff;text-align:left;border:0;border-bottom:1px solid #e3e8eb;padding:9px 10px;color:#0a2f43;font-size:.75rem}.opciones button:hover{background:#e9f0f5}.opciones small{display:block;color:#6f8390}.opciones .sin-resultados{padding:10px;color:#708595;font-size:.75rem}.sugerencia{display:inline-block;border:0;background:#e4eef5;color:#255a81;border-radius:7px;padding:6px 8px;margin-top:7px;font-size:.7rem;text-align:left;line-height:1.3}.sugerencia:hover{background:#d2e3ef}.sugerencia strong{font-weight:700}.estado{display:inline-block;border-radius:30px;padding:6px 10px;font-weight:700;font-size:.7rem;background:#e6e9ed;color:#526778;white-space:nowrap}.estado.confirmado{background:#dceee4;color:#196544}.estado.sugerido{background:#e1eaf3;color:#255a81}.estado.sin_equivalencia{background:#f1e5db;color:#835a2d}.estado.deshabilitado{background:#e2e2e2;color:#666}
+.btn{border-radius:22px;border:1px solid #b9c9d2;padding:8px 11px;background:#f7f8fa;color:#0a2f43;font-weight:700;font-size:.72rem;white-space:nowrap}.btn:hover{background:#e5ebef}.btn.primary{background:#f52125;color:#fff;border-color:#f52125}.btn.primary:hover{background:#d91c20}.btn:disabled{opacity:.48;cursor:default}.mas{margin-top:10px;color:#607988;font-size:.72rem}.mas summary{cursor:pointer;width:max-content;list-style:none;text-decoration:underline}.mas summary::-webkit-details-marker{display:none}.mas-acciones{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.mensaje{padding:11px;border-radius:9px;background:#e3efe8;color:#176244;font-size:.78rem;margin:12px 0}.mensaje.error{background:#f8e2e2;color:#a32830}.guardar-pie{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;padding:15px;border-top:1px solid #dce3e8;background:#e9eef1}.guardar-pie .cuenta{margin-right:auto;font-size:.78rem;font-weight:700;color:#4d6979}.guardar-pie .primary{font-size:.8rem;padding:10px 18px}.estado.cambio{background:#fff0d6;color:#885b12}.paginacion{display:flex;justify-content:space-between;align-items:center;padding:13px;gap:10px;font-size:.78rem;color:#647b88}.paginacion button{padding:6px 11px}.sin-filas{padding:25px;color:#657e8c;font-size:.84rem}
+@media(max-width:600px){.wrap{padding:19px 12px 50px}.toolbar input{flex-basis:100%}.resumen{margin-left:0}.tablewrap{max-height:none}}
+</style></head>
+<body><main class="wrap"><div class="top"><span class="pill">Documentos SII</span><a href="/">← Volver a la bandeja</a></div>
+<h1>Equivalencias<span>de productos SII / Finnegans</span></h1>
+<p class="sub">Elegí productos de Finnegans en varias líneas y guardá todas las relaciones juntas al final de la grilla.</p>
+<div class="toolbar"><input id="filtro" type="search" placeholder="Buscar descripción o producto" aria-label="Buscar equivalencias"><select id="estado" aria-label="Filtrar por estado"><option value="todos">Todos los estados</option><option value="pendiente">Pendientes</option><option value="sugerido">Con sugerencia</option><option value="confirmado">Confirmados</option><option value="sin_equivalencia">Sin equivalencia</option><option value="deshabilitado">Deshabilitados</option></select><span class="resumen" id="resumen">Cargando…</span></div>
+<p class="mensaje" id="aviso" role="status" hidden></p>
+<section class="panel"><div class="tablewrap"><table class="tabla"><colgroup><col style="width:31%"><col style="width:43%"><col style="width:12%"><col style="width:7%"><col style="width:7%"></colgroup><thead><tr><th>Descripción SII</th><th>Producto Finnegans · seleccionar aquí</th><th>Estado</th><th class="numero">Veces</th><th>Última</th></tr></thead><tbody id="filas"></tbody></table></div><div class="guardar-pie"><span class="cuenta" id="cuentaCambios">Ningún cambio pendiente</span><button class="btn" id="descartar" type="button" disabled>Descartar cambios</button><button class="btn primary" id="guardarTodo" type="button" disabled>Guardar relaciones</button></div><div class="paginacion"><button class="btn" id="anterior" type="button">← Anterior</button><span id="paginaTexto"></span><button class="btn" id="siguiente" type="button">Siguiente →</button></div></section></main>
+<script>
+const $=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let pagina=1,total=0,filas=[],busquedaNumero=0,consultaNumero=0,temporizadorBusqueda=0,perfilActivo=null;
+const pendientes=new Map(),etiquetas={pendiente:'Pendiente',sugerido:'Sugerido',confirmado:'Confirmado',sin_equivalencia:'Sin equivalencia',deshabilitado:'Deshabilitado'};
+async function api(url,opciones={}){const r=await fetch(url,{cache:'no-store',...opciones});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.detail||'No se pudo completar la operación.');return d}
+function aviso(texto,error=false){const caja=$('aviso');caja.textContent=texto;caja.className='mensaje'+(error?' error':'');caja.hidden=!texto}
+function filaPorId(id){return filas.find(f=>f.id===id)}
+function celdaPorId(id){return Array.from($('filas').querySelectorAll('tr[data-id]')).find(tr=>Number(tr.dataset.id)===id)}
+function productoTexto(producto){return producto?producto.nombre+' · '+producto.codigo:'Sin producto seleccionado'}
+function actualizarPie(){const cantidad=pendientes.size;$('cuentaCambios').textContent=cantidad?cantidad+' '+(cantidad===1?'relación pendiente':'relaciones pendientes')+' de guardar':'Ningún cambio pendiente';$('guardarTodo').disabled=!cantidad;$('descartar').disabled=!cantidad}
+function dibujar(){
+  $('resumen').textContent=total+' descripciones únicas';$('paginaTexto').textContent='Página '+pagina+' · '+total+' resultados';
+  $('anterior').disabled=pagina===1;$('siguiente').disabled=pagina*50>=total;
+  $('filas').innerHTML=filas.length?filas.map(f=>{
+    const cambio=pendientes.get(f.id),producto=cambio?(cambio.estado==='confirmado'?cambio.producto:null):f.producto||null;
+    const nombre=cambio?(producto?productoTexto(producto):etiquetas[cambio.estado]):producto?productoTexto(producto):(f.producto_codigo?'Producto no disponible: '+f.producto_codigo:'Sin producto seleccionado');
+    const sugerencia=f.sugerencia?'<button class="sugerencia" type="button" data-accion="sugerencia" title="Elegir esta sugerencia">Sugerencia · <strong>'+esc(f.sugerencia.nombre)+'</strong> · '+Math.round(f.sugerencia.puntaje*100)+'%</button>':'';
+    return '<tr data-id="'+f.id+'"><td class="descripcion"><strong>'+esc(f.descripcion_original)+'</strong><small>Normalizado: '+esc(f.descripcion_normalizada)+'</small><small>Primera aparición: '+esc(f.primera_aparicion||'—')+'</small></td><td class="producto-celda"><div class="producto-actual'+(producto?'':' vacio')+'">'+esc(nombre)+'</div><div class="edicion"><input class="busqueda-producto" type="search" placeholder="Buscar producto o código" aria-label="Buscar producto Finnegans para '+esc(f.descripcion_original)+'" autocomplete="off"></div><div class="opciones" hidden></div>'+sugerencia+'<details class="mas"><summary>Más opciones</summary><div class="mas-acciones"><button class="btn" type="button" data-accion="sin_equivalencia">Sin equivalencia</button><button class="btn" type="button" data-accion="deshabilitado">Deshabilitar</button><button class="btn" type="button" data-accion="pendiente">Dejar pendiente</button></div></details></td><td><span class="estado '+(cambio?'cambio':esc(f.estado))+'">'+(cambio?'Sin guardar':esc(etiquetas[f.estado]||f.estado))+'</span></td><td class="numero">'+f.apariciones+'</td><td>'+esc(f.ultima_aparicion||'—')+'</td></tr>';
+  }).join(''):'<tr><td colspan="5" class="sin-filas">No hay descripciones para este filtro.</td></tr>';
+  actualizarPie();
+}
+async function cargar(){const numero=++busquedaNumero;$('resumen').textContent='Cargando equivalencias…';try{
+  const parametros=new URLSearchParams({q:$('filtro').value,estado:$('estado').value,pagina:String(pagina),limite:'50'});
+  const datos=await api('/api/equivalencias?'+parametros);if(numero!==busquedaNumero)return;
+  if(perfilActivo&&datos.perfil_id!==perfilActivo){pendientes.clear();aviso('Cambió el certificado activo. Revisá las equivalencias de este perfil.',true)}
+  perfilActivo=datos.perfil_id;
+  filas=datos.filas;total=datos.total;dibujar();
+}catch(error){if(numero!==busquedaNumero)return;$('resumen').textContent='No se pudo cargar';$('filas').innerHTML='<tr><td colspan="5" class="sin-filas">'+esc(error.message)+'</td></tr>';aviso(error.message,true)}}
+function marcar(id,estado,producto=null){const original=filaPorId(id);if(!original)return;
+  const igual=estado==='confirmado'?original.estado==='confirmado'&&original.producto_codigo===producto?.codigo:
+    estado==='pendiente'?(original.estado==='pendiente'||original.estado==='sugerido'):original.estado===estado;
+  if(igual)pendientes.delete(id);else pendientes.set(id,{estado,codigo:producto?.codigo||null,producto});
+  dibujar();aviso('');
+}
+function elegir(id,producto){marcar(id,'confirmado',producto)}
+function buscarProducto(id,entrada){clearTimeout(temporizadorBusqueda);const texto=entrada.value.trim(),numero=++consultaNumero,caja=celdaPorId(id)?.querySelector('.opciones');if(!caja)return;
+  if(!texto){caja.hidden=true;return}caja.hidden=false;caja.innerHTML='<div class="sin-resultados">Buscando…</div>';
+  temporizadorBusqueda=setTimeout(async()=>{try{const datos=await api('/api/productos?q='+encodeURIComponent(texto)+'&limite=12');if(numero!==consultaNumero||!caja.isConnected)return;caja.replaceChildren();
+    if(!datos.productos.length){caja.innerHTML='<div class="sin-resultados">No se encontraron productos.</div>';return}
+    datos.productos.forEach(producto=>{const boton=document.createElement('button');boton.type='button';boton.innerHTML='<strong>'+esc(producto.nombre)+'</strong><small>'+esc(producto.codigo)+'</small>';boton.onclick=()=>elegir(id,producto);caja.append(boton)});
+  }catch(error){if(numero===consultaNumero)aviso(error.message,true)}},220);
+}
+async function guardarTodo(){if(!pendientes.size)return;const decisiones=Array.from(pendientes,([producto_sii_id,cambio])=>({producto_sii_id,codigo:cambio.codigo,estado:cambio.estado})),boton=$('guardarTodo');boton.disabled=true;boton.textContent='Guardando…';
+  try{const resultado=await api('/api/equivalencias/lote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({perfil_esperado:perfilActivo,decisiones})});pendientes.clear();await cargar();aviso(resultado.guardadas+' '+(resultado.guardadas===1?'relación guardada':'relaciones guardadas')+' correctamente.')}
+  catch(error){aviso(error.message,true)}finally{boton.textContent='Guardar relaciones';actualizarPie()}
+}
+$('filas').addEventListener('input',evento=>{if(!evento.target.matches('.busqueda-producto'))return;const fila=evento.target.closest('tr[data-id]');buscarProducto(Number(fila.dataset.id),evento.target)});
+$('filas').addEventListener('click',evento=>{const boton=evento.target.closest('button[data-accion]');if(!boton)return;const fila=boton.closest('tr[data-id]'),id=Number(fila.dataset.id),accion=boton.dataset.accion;
+  if(accion==='sugerencia'){const sugerencia=filaPorId(id)?.sugerencia;if(sugerencia)elegir(id,sugerencia)}
+  else marcar(id,accion);
+});
+let temporizadorFiltro=0;$('filtro').oninput=()=>{clearTimeout(temporizadorFiltro);temporizadorFiltro=setTimeout(()=>{pagina=1;cargar()},250)};$('estado').onchange=()=>{pagina=1;cargar()};$('anterior').onclick=()=>{pagina--;cargar()};$('siguiente').onclick=()=>{pagina++;cargar()};$('guardarTodo').onclick=guardarTodo;$('descartar').onclick=()=>{pendientes.clear();dibujar();aviso('Cambios sin guardar descartados.')};window.addEventListener('beforeunload',evento=>{if(pendientes.size){evento.preventDefault();evento.returnValue=''}});cargar();
+</script></body></html>

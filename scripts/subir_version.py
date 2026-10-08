@@ -42,7 +42,8 @@ def main() -> int:
         return 1
 
     io.open(ARCHIVO, "w", encoding="utf-8", newline="").write(actualizado)
-    print(f"{__version__} → {nueva}")
+    # La terminal Windows puede usar cp1252 y fallar al imprimir la flecha Unicode.
+    print(f"{__version__} -> {nueva}")
     return 0
 
 
