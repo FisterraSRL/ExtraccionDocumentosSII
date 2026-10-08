@@ -40,11 +40,192 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
+from copy import deepcopy
 
 from app.config import settings
 from app.models import Documento
 
 log = logging.getLogger(__name__)
+
+PATRON_IE = re.compile(
+    r"\bIE\s*Base\s*:\s*([+-]?[\d.,]+)\s*[-–]?\s*IE\s*Variable\s*:\s*([+-]?[\d.,]+)",
+    re.IGNORECASE,
+)
+
+
+def _decimal_ie(texto: str) -> Decimal:
+    # El PDF puede imprimir coma o punto decimal; cuando trae ambos, el punto es miles.
+    limpio = texto.replace(".", "").replace(",", ".") if "," in texto else texto
+    try:
+        return Decimal(limpio)
+    except InvalidOperation as exc:
+        raise FinnegansMapeoError("No se pudieron leer los componentes IE del combustible.") from exc
+
+
+def _importes_ie(documento: Documento, items: list[dict]) -> list[int]:
+    """Calcula el IE conocido por ítem antes de completar otros importes exentos."""
+    calculados: list[Decimal] = []
+    for item in items:
+        descripcion = str(item.get("desc") or "")
+        coincidencia = PATRON_IE.search(descripcion)
+        if not coincidencia:
+            if re.search(r"\bIE\s*(?:Base|Variable)\s*:", descripcion, re.IGNORECASE):
+                raise FinnegansMapeoError(
+                    f"Folio {documento.folio}: el detalle menciona IE, pero no se pudieron "
+                    "leer sus componentes base y variable. Revisá el PDF antes de enviar."
+                )
+            calculados.append(Decimal(0))
+            continue
+        cantidad = item.get("cant")
+        try:
+            cantidad_ie = Decimal(str(cantidad))
+        except InvalidOperation:
+            cantidad_ie = Decimal(0)
+        if cantidad_ie <= 0:
+            raise FinnegansMapeoError(
+                f"Folio {documento.folio}: falta la cantidad de combustible para calcular IE."
+            )
+        tasa = _decimal_ie(coincidencia.group(1)) + _decimal_ie(coincidencia.group(2))
+        importe = tasa * cantidad_ie
+        if importe <= 0:
+            raise FinnegansMapeoError(
+                f"Folio {documento.folio}: el IE resultante no es positivo; revisá "
+                "cómo imputarlo antes de enviar."
+            )
+        calculados.append(importe)
+
+    if not any(calculados):
+        return [0] * len(items)
+
+    esperado = sum(calculados).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    importes = [int(valor.to_integral_value(rounding=ROUND_FLOOR)) for valor in calculados]
+    faltan = int(esperado) - sum(importes)
+    if not 0 <= faltan <= sum(valor > 0 for valor in calculados):
+        raise FinnegansMapeoError(
+            f"Folio {documento.folio}: no se pudo distribuir el redondeo del IE entre los ítems."
+        )
+    orden = sorted(
+        (indice for indice, valor in enumerate(calculados) if valor > 0),
+        key=lambda indice: calculados[indice] - importes[indice], reverse=True,
+    )
+    for indice in orden[:faltan]:
+        importes[indice] += 1
+    return importes
+
+
+def _importe(valor: object) -> Decimal:
+    try:
+        return Decimal(str(valor or 0))
+    except InvalidOperation as exc:
+        raise FinnegansMapeoError("Un importe del documento no tiene formato numérico.") from exc
+
+
+def _dimension_centro_costo(centros: list[dict]) -> list[dict]:
+    if not centros or sum(_importe(c.get("porcentaje")) for c in centros) != 100:
+        raise FinnegansMapeoError(
+            "La distribución de Centros de Costo debe sumar exactamente 100 %."
+        )
+    items = []
+    for centro in centros:
+        codigo = str(centro.get("codigo") or "").strip()
+        porcentaje = _importe(centro.get("porcentaje"))
+        if not codigo or porcentaje <= 0:
+            raise FinnegansMapeoError(
+                "Cada Centro de Costo debe tener código y porcentaje positivo."
+            )
+        items.append({
+            "codigo": codigo,
+            "porcentaje": int(porcentaje) if porcentaje == porcentaje.to_integral_value()
+            else float(porcentaje),
+        })
+    return [{
+        "dimensionCodigo": "DIMCTC",
+        "distribucionCodigo": "",
+        "tipoCalculo": "2",
+        "distribucionItems": items,
+    }]
+
+
+def _total_calculado(payload: dict) -> Decimal:
+    # En el ejemplo oficial de facturaCompra, ImporteExento es parte del precio
+    # (10 × 1500 contiene 10000 exentos), no un importe adicional al precio.
+    return sum(
+        _importe(linea["Cantidad"]) * _importe(linea["Precio"])
+        for linea in payload["Productos"]
+    ) + sum(_importe(concepto["ConceptoImporte"]) for concepto in payload["Conceptos"])
+
+
+def _agregar_lineas_de_ajuste(documento: Documento, payload: dict) -> None:
+    productos = payload["Productos"]
+    neto = _importe(documento.neto)
+    iva = _importe(documento.iva)
+    exento = _importe(documento.exento)
+    total = _importe(documento.total)
+
+    def agregar_linea(importe: Decimal, descripcion: str, es_exento: bool) -> None:
+        if importe <= 0:
+            return
+        numero = int(importe) if importe == importe.to_integral_value() else float(importe)
+        linea = {
+            "ProductoCodigo": productos[0]["ProductoCodigo"],
+            "Cantidad": 1,
+            "Precio": numero,
+            "PrecioBase": numero,
+            "ImporteExento": numero if es_exento else 0,
+            "Descripcion": descripcion,
+        }
+        if productos[0].get("DimensionDistribucion"):
+            linea["DimensionDistribucion"] = deepcopy(productos[0]["DimensionDistribucion"])
+        productos.append(linea)
+
+    if documento.items:
+        bruto_items = sum(
+            _importe(linea["Cantidad"]) * _importe(linea["Precio"])
+            for linea in productos
+        )
+        base_esperada = neto + exento
+        diferencia_base = base_esperada - bruto_items
+        if diferencia_base < 0:
+            raise FinnegansMapeoError(
+                f"Folio {documento.folio}: los precios originales superan la base del SII "
+                f"en ${-diferencia_base}. Revisá el descuento o IVA incluido antes de enviar."
+            )
+        agregar_linea(
+            diferencia_base, "Ajuste de redondeo de base del SII",
+            es_exento=bool(exento and not neto),
+        )
+
+    if not documento.items and not (neto or iva or exento):
+        return
+
+    adicional = total - neto - iva - exento
+    ie = sum(_importes_ie(documento, documento.items or []))
+    if adicional < ie or adicional < 0:
+        raise FinnegansMapeoError(
+            f"Folio {documento.folio}: los impuestos y la base superan el total del SII. "
+            "Revisá el PDF antes de enviar a Finnegans."
+        )
+    agregar_linea(Decimal(ie), "Impuesto específico del combustible", es_exento=True)
+    agregar_linea(adicional - ie, "Ajuste exento del total del SII", es_exento=True)
+
+
+def ajuste_importe_exento(documento: Documento, payload: dict) -> Decimal:
+    """Importe de las líneas exentas adicionales, sin contar los ítems del PDF."""
+    originales = len(documento.items) if documento.items else 1
+    return sum(_importe(item["ImporteExento"]) for item in payload["Productos"][originales:])
+
+
+def _validar_total_control(documento: Documento, payload: dict) -> None:
+    calculado = _total_calculado(payload)
+    total = _importe(payload["ImporteTotalControl"])
+    if calculado != total:
+        raise FinnegansMapeoError(
+            f"Folio {documento.folio}: los productos y conceptos suman "
+            f"${calculado}, pero el total del SII es ${total}. "
+            "Se conservaron la cantidad y el precio del PDF; revisá sus descuentos "
+            "o impuestos antes de enviar a Finnegans."
+        )
 
 # El tipo de transacción es siempre "OPER"; lo que distingue un documento de otro es el
 # subtipo. Estos códigos los entregó el dueño del proyecto desde su instancia.
@@ -202,7 +383,9 @@ class FinnegansClient:
 
     # ---------- Armado del documento ----------
 
-    def construir_payload(self, documento: Documento, empresa_codigo: str | None = None) -> dict:
+    def construir_payload(self, documento: Documento, empresa_codigo: str | None = None,
+                         codigos_por_indice: dict[int, str] | None = None,
+                         centros_por_indice: dict[int, list[dict]] | None = None) -> dict:
         """Traduce un Documento nuestro al OperacionVO de `POST /facturaCompra`.
 
         La forma está calcada de un documento real de la instancia, que corrigió varias
@@ -272,17 +455,19 @@ class FinnegansClient:
             "ComprobanteTipoImpositivoCodigo": None,
             "CAE": "",
             "CAEFechaVto": None,
-            "Productos": self._productos(documento, neto, exento),
+            "Productos": self._productos(
+                documento, neto, iva, exento, codigos_por_indice, centros_por_indice
+            ),
             "Conceptos": [
                 {
                     "ConceptoCodigo": settings.finnegans_concepto_iva,
-                    "ImporteEditable": False,
+                    "ImporteEditable": True,
                     "ConceptoImporte": iva,
                     "ConceptoImporteGravado": neto,
                 },
                 {
                     "ConceptoCodigo": settings.finnegans_concepto_exento,
-                    "ImporteEditable": False,
+                    "ImporteEditable": True,
                     "ConceptoImporte": 0,
                     "ConceptoImporteGravado": exento,
                 },
@@ -297,68 +482,97 @@ class FinnegansClient:
         if documento.folio_doc_ref:
             payload["CHL_FolioRef"] = str(documento.folio_doc_ref)
             payload["CHL_FechaRef"] = fecha
+        _agregar_lineas_de_ajuste(documento, payload)
+        # El IE va en una línea exenta; el concepto exento debe reflejar la misma
+        # base para que Finnegans no recalcule una clasificación inconsistente.
+        base_exenta = sum(
+            _importe(linea["ImporteExento"]) for linea in payload["Productos"]
+        )
+        payload["Conceptos"][1]["ConceptoImporteGravado"] = (
+            int(base_exenta) if base_exenta == base_exenta.to_integral_value()
+            else float(base_exenta)
+        )
+        _validar_total_control(documento, payload)
         return payload
 
-    def _productos(self, documento: Documento, neto: float, exento: float) -> list[dict]:
+    def _productos(self, documento: Documento, neto: float, iva: float, exento: float,
+                   codigos_por_indice: dict[int, str] | None = None,
+                   centros_por_indice: dict[int, list[dict]] | None = None) -> list[dict]:
         """Líneas del comprobante, una por ítem leído del PDF del SII.
 
         Todas van contra el mismo producto genérico: los ítems del SII son texto libre
         del emisor y no tienen ningún código que exista en el maestro de Finnegans. La
         descripción real del ítem queda en la línea, que es donde sirve.
 
-        Si el SII no publicó el desglose del documento, va una sola línea por el total.
+        Cada ítem conserva la cantidad y el precio unitario del PDF. El control
+        monetario usa el producto exacto: Finnegans puede controlar centavos aunque
+        el PDF del SII muestre subtotales redondeados al peso.
+        ImporteExento clasifica una parte del precio de la misma línea: no es una
+        suma adicional. El IE y otros cargos se agregan como líneas exentas propias.
         """
         codigo = settings.finnegans_producto
         items = documento.items or []
 
-        # Las líneas tienen que sumar la base imponible, o el comprobante queda mal: el
-        # ERP calcula el total como base + IVA. Hay emisores cuyo PDF imprime los valores
-        # de cada ítem **con IVA incluido** (la suma da neto x 1,19), y mandarlos como
-        # base gravada inflaría la factura. Cuando no cuadran no se reparte el importe a
-        # ojo: va una sola línea por la base real, que es el dato del que sí estamos
-        # seguros, y el desglose informativo sigue estando en el portal.
-        base = neto + exento
-        if items and base:
-            suma = sum(i.get("subtotal") or 0 for i in items)
-            if abs(suma - base) > max(2.0, abs(base) * 0.01):
-                log.info(
-                    "Documento %s folio %s: los ítems suman %.0f y la base imponible es "
-                    "%.0f; se envía una sola línea por la base.",
-                    documento.tipo, documento.folio, suma, base,
-                )
-                items = []
+        if items and neto and exento:
+            raise FinnegansMapeoError(
+                f"Folio {documento.folio}: hay neto y exento, pero el detalle no indica "
+                "qué ítems son exentos. Revisá el PDF antes de enviar."
+            )
 
         if not items:
-            return [{
+            precio = (neto + exento) or (documento.total if not iva else 0)
+            producto = {
                 "ProductoCodigo": codigo,
                 "Cantidad": 1,
-                "Precio": neto or documento.total,
-                "PrecioBase": neto or documento.total,
+                "Precio": precio,
+                "PrecioBase": precio,
                 "ImporteExento": exento,
                 "Descripcion": f"{documento.tipo_nombre} {documento.folio}"[:200],
-            }]
-        return [
-            {
-                "ProductoCodigo": codigo,
-                "Cantidad": item.get("cant") or 1,
-                "Precio": item.get("precio") or item.get("subtotal") or 0,
-                "PrecioBase": item.get("precio") or item.get("subtotal") or 0,
-                "ImporteExento": 0,
+            }
+            if centros_por_indice and centros_por_indice.get(0):
+                producto["DimensionDistribucion"] = _dimension_centro_costo(
+                    centros_por_indice[0]
+                )
+            return [producto]
+        productos = []
+        for indice, item in enumerate(items):
+            cantidad = item.get("cant")
+            precio = item.get("precio")
+            if cantidad is None or precio is None:
+                raise FinnegansMapeoError(
+                    f"Folio {documento.folio}: un ítem no tiene cantidad o precio en el PDF. "
+                    "Revisá el detalle antes de enviar."
+                )
+            producto = {
+                "ProductoCodigo": (codigos_por_indice or {}).get(indice) or codigo,
+                "Cantidad": cantidad,
+                "Precio": precio,
+                "PrecioBase": precio,
+                "ImporteExento": (item.get("subtotal") or 0) if exento else 0,
                 "Descripcion": (item.get("desc") or "")[:200],
             }
-            for item in items
-        ]
+            if centros_por_indice and centros_por_indice.get(indice):
+                producto["DimensionDistribucion"] = _dimension_centro_costo(
+                    centros_por_indice[indice]
+                )
+            productos.append(producto)
+        return productos
 
     # ---------- Envío ----------
 
-    def send_document(self, documento: Documento) -> FinnegansSendResult:
+    def send_document(self, documento: Documento,
+                      codigos_por_indice: dict[int, str] | None = None,
+                      centros_por_indice: dict[int, list[dict]] | None = None) -> FinnegansSendResult:
         """Registra el documento en Finnegans como factura de compra.
 
         **Escribe en el ERP productivo.** Antes de llamarlo conviene revisar el resultado
         de `construir_payload()` para el mismo documento.
         """
         try:
-            payload = self.construir_payload(documento)
+            payload = self.construir_payload(
+                documento, codigos_por_indice=codigos_por_indice,
+                centros_por_indice=centros_por_indice,
+            )
         except (FinnegansMapeoError, FinnegansConfigError) as exc:
             return FinnegansSendResult(ok=False, finnegans_id=None, error_detalle=str(exc))
 

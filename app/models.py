@@ -259,6 +259,19 @@ class AsociacionItem(Base):
     actualizado_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class DistribucionCentroCosto(Base):
+    """Imputación elegida para un ítem, separada del detalle original del SII."""
+
+    __tablename__ = "distribuciones_centros_costo"
+
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    documento_id: Mapped[int] = mapped_column(ForeignKey("documentos.id"), primary_key=True)
+    indice: Mapped[int] = mapped_column(Integer, primary_key=True)
+    descripcion_firma: Mapped[str] = mapped_column(Text, nullable=False)
+    centros: Mapped[list] = mapped_column(JSON, nullable=False)
+    actualizado_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ProductoSII(Base):
     """Descripción única del SII; el texto original se conserva para consulta."""
 

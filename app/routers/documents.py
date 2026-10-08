@@ -20,8 +20,12 @@ from app.finnegans.client import (
     FinnegansClient,
     FinnegansConfigError,
     FinnegansMapeoError,
+    FinnegansSendResult,
+    ajuste_importe_exento,
 )
 from app.models import (
+    AsociacionItem,
+    DistribucionCentroCosto,
     Documento,
     Empresa,
     EmpresaOut,
@@ -31,6 +35,7 @@ from app.models import (
     EnviarLote,
     EnviarResult,
     EstadoDocumento,
+    ProductoFinnegans,
     SyncResult,
 )
 from app.config import settings
@@ -648,6 +653,50 @@ def _cliente_finnegans() -> FinnegansClient:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+def _codigos_seleccionados(db: Session, documento: Documento) -> dict[int, str]:
+    """Usa las elecciones vigentes del perfil activo al previsualizar y al enviar."""
+    if not documento.items or not settings.sii_perfil:
+        return {}
+    from app.productos import _firma
+
+    asociaciones = db.execute(select(AsociacionItem).where(
+        AsociacionItem.perfil_id == settings.sii_perfil,
+        AsociacionItem.documento_id == documento.id,
+    )).scalars().all()
+    codigos = {}
+    for asociacion in asociaciones:
+        indice = asociacion.indice
+        if not (0 <= indice < len(documento.items)) or not asociacion.producto_codigo:
+            continue
+        if asociacion.descripcion_firma != _firma(documento.items[indice]):
+            continue
+        producto = db.get(ProductoFinnegans, (settings.sii_perfil, asociacion.producto_codigo))
+        if not producto or not producto.disponible or producto.activo is False:
+            raise FinnegansMapeoError(
+                f"Folio {documento.folio}: el producto seleccionado en el ítem {indice + 1} "
+                "ya no está disponible. Elegí otro producto antes de enviar."
+            )
+        codigos[indice] = producto.codigo
+    return codigos
+
+
+def _centros_seleccionados(db: Session, documento: Documento) -> dict[int, list[dict]]:
+    if not documento.items or not settings.sii_perfil:
+        return {}
+    from app.productos import _firma
+
+    filas = db.execute(select(DistribucionCentroCosto).where(
+        DistribucionCentroCosto.perfil_id == settings.sii_perfil,
+        DistribucionCentroCosto.documento_id == documento.id,
+    )).scalars().all()
+    return {
+        fila.indice: fila.centros
+        for fila in filas
+        if 0 <= fila.indice < len(documento.items)
+        and fila.descripcion_firma == _firma(documento.items[fila.indice])
+    }
+
+
 def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> EnviarResult:
     """Manda un documento y deja escrito en la base cómo le fue.
 
@@ -656,7 +705,14 @@ def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> En
     crearía comprobantes duplicados en el ERP, que es mucho peor que tener que volver a
     apretar el botón.
     """
-    resultado = finnegans.send_document(documento)
+    try:
+        codigos = _codigos_seleccionados(db, documento)
+        centros = _centros_seleccionados(db, documento)
+        resultado = finnegans.send_document(
+            documento, codigos_por_indice=codigos, centros_por_indice=centros
+        )
+    except FinnegansMapeoError as exc:
+        resultado = FinnegansSendResult(ok=False, finnegans_id=None, error_detalle=str(exc))
 
     if resultado.ok:
         documento.estado = EstadoDocumento.ENVIADO
@@ -681,7 +737,8 @@ def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> En
 
 
 @router.get("/documents/{documento_id}/finnegans")
-def previsualizar_documento(documento_id: int, db: Session = Depends(get_db)):
+def previsualizar_documento(documento_id: int, response: Response,
+                            db: Session = Depends(get_db)):
     """El JSON exacto que se le mandaría a Finnegans, sin mandarlo.
 
     Sirve para revisar el mapeo antes de escribir en el ERP, que es una operación que no
@@ -692,7 +749,15 @@ def previsualizar_documento(documento_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
     finnegans = _cliente_finnegans()
     try:
-        return finnegans.construir_payload(documento)
+        payload = finnegans.construir_payload(
+            documento, codigos_por_indice=_codigos_seleccionados(db, documento),
+            centros_por_indice=_centros_seleccionados(db, documento),
+        )
+        # El JSON depende de reglas y configuración que pueden cambiar sin que cambie
+        # el id del documento. Una copia HTTP anterior no sirve para decidir un envío.
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Ajuste-Importe-Exento"] = str(ajuste_importe_exento(documento, payload))
+        return payload
     except (FinnegansMapeoError, FinnegansConfigError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

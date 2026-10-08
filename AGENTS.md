@@ -68,12 +68,21 @@ punta, el envío. Es un pedido explícito del dueño del proyecto y no hay que c
   detalle de ítems sale del PDF, no del XML. No vuelvas a intentar este camino sin un
   dato nuevo.
 
-**En la base local no hay documentos marcados como enviados.** Hubo un intento el
-23-sep-2026 que fue rechazado; el mensaje se perdió (ver §12).
+**El primer documento entró en Finnegans el 8-oct-2026.** El folio de combustible
+usado en las pruebas quedó marcado como enviado y un GET posterior confirmó que
+Finnegans lo guardó con el importe de control correcto y tres líneas de producto. La
+cuenta de compra del producto elegido exige distribuir el 100 % en la dimensión
+Centros de Costo (`DIMCTC`); la cuenta, el producto y el proveedor no tenían
+distribución predeterminada. El usuario indicó un centro de costo al 100 % para
+este folio. No extender esa elección a otros documentos sin que el usuario la haga.
+`DimensionDistribucion` va dentro de cada producto; con `tipoCalculo: "2"` recibe
+`distribucionItems` con `codigo` y `porcentaje` que sumen 100. Fuente:
+https://bc.finneg.com/t/como-llamar-un-metodo-post-de-una-transaccion/2907
+Un intento anterior, el 23-sep-2026, fue rechazado y se perdió su mensaje (ver §12).
 
 **Números al 07-oct-2026** (base local, para dimensionar): 2.736 documentos,
 55 empresas, 1.367 documentos con desglose de ítems, 142 con alguna observación
-sobre ese desglose y 2.337 descripciones únicas en el maestro. Versión `1.0.3`.
+sobre ese desglose y 2.337 descripciones únicas en el maestro. Versión `1.0.4`.
 
 ---
 
@@ -143,6 +152,8 @@ POST   /api/productos/sincronizar    trae producto/list de Finnegans
 GET    /api/productos?q=...          búsqueda local por nombre o código
 POST   /api/documents/{id}/productos/preparar   sugiere y asocia coincidencias claras
 PUT    /api/documents/{id}/items/{indice}/producto  elección o limpieza manual
+GET    /api/documents/{id}/centros-costo          distribución guardada por ítem
+PUT    /api/documents/{id}/items/{indice}/centros-costo  códigos y porcentajes
 ```
 
 ### Cómo correrlo
@@ -348,6 +359,46 @@ devuelve el token en **texto plano**, no JSON. Va después como `Authorization: 
 - **`Conceptos` es el desglose impositivo** (IVA y base gravada), **no** las líneas de
   gasto. Leyendo solo la documentación se mapea mal.
 - **Las líneas van en `Productos`**, con un código del maestro.
+- Cuando el PDF de combustible detalla `IE Base` e `IE Variable`, el impuesto
+  específico se calcula como cantidad × (base + variable), se redondea al peso y se
+  envía como **una línea de producto exenta aparte**: `Cantidad: 1`, `Precio` e
+  `ImporteExento` por el mismo importe. El ítem original de combustible conserva
+  cantidad y precio y no lleva ese impuesto en su propio `ImporteExento`.
+  El `exento` informado por el SII no se modifica.
+- En `Productos`, **conservar `Cantidad` y `Precio` originales del PDF**. El control
+  monetario usa `Cantidad × Precio` **sin redondear** cada línea. En la factura de
+  combustible que falló, esa multiplicación difiere del neto SII solo por una
+  fracción de peso: se agrega una línea de ajuste gravada. `ImporteExento` **no se
+  suma** al producto: clasifica qué parte de `Cantidad × Precio` es exenta. El
+  ejemplo oficial de `facturaCompra` muestra 10 × 1500 = 15000, con 10000 en
+  `ImporteExento` y 5000 de base gravada. Una diferencia positiva entre total SII
+  y neto + IVA + exento se agrega como línea de producto exenta separada, nunca
+  como `ImporteExento` del ítem original. Una diferencia negativa se bloquea;
+  no se alteran cantidad, precio o IVA. Los documentos con neto y exento sin
+  identificación de la afectación por ítem siguen requiriendo revisión. Solo se
+  usa una línea genérica cuando no existe desglose de ítems. La vista previa
+  informa el total de líneas exentas adicionales por cabecera HTTP, sin agregar
+  campos al JSON de Finnegans; el modal lo destaca para el primer documento.
+  Fuente del ejemplo: https://bc-dev.finneg.com/t/como-realizar-una-integracion-a-traves-de-la-api-de-factura-de-compra/3458
+  Finnegans explica que un impuesto interno incorporado al precio también debe
+  ir en `ImporteExento` para excluirlo de IVA y retenciones:
+  https://bc.finneg.com/t/como-registrar-una-factura-de-compra-que-contiene-impuestos-internos/5030
+  La bandeja guarda por ítem el producto elegido, asociado al perfil activo. La
+  previsualización y el envío deben usar ese código, no volver al genérico de
+  `.env`. Cuando hay líneas exentas adicionales, `ConceptoImporteGravado` del
+  concepto exento debe concordar con la suma de `Productos[].ImporteExento`.
+  `GET /api/documents/{id}/finnegans` responde `Cache-Control: no-store` y el
+  frontend pide `cache: "no-store"`: un JSON anterior no debe parecer el actual
+  al revisar un error o confirmar un envío.
+- `Conceptos[].ImporteEditable` debe ir en `true` para que Finnegans use el IVA y
+  la base gravada enviados. Su documentación indica que con `false` los recalcula,
+  lo que puede causar el error de importe total contra importe de control. Fuente:
+  https://bc-dev.finneg.com/t/como-realizar-una-integracion-a-traves-de-la-api-de-factura-de-compra/3458
+  La propia base de conocimiento describe ese error por diferencias decimales de
+  IVA y sugiere desactivar el control en la configuración del tipo de documento:
+  https://bc.finneg.com/t/api-facturacompras-mensaje-error-el-importe-total-no-coincide-con-el-importe-de-control/4375
+  No cambiar esa configuración del ERP desde esta aplicación. El folio de prueba
+  sí quedó registrado tras corregir importes y asignar su Centro de Costo.
 
 **`Vencimientos` no se manda.** El documento de ejemplo lo trae porque el ERP lo generó
 al grabarlo, pero armarlo desde acá significaría elegir la cuenta contable de
@@ -359,9 +410,9 @@ En el 8% de los documentos con desglose (104 de 1.287) **los ítems suman `neto 
 Mandarlos como base gravada inflaría la factura: el documento usado en la prueba habría quedado
 registrado en $33.296 en vez de $27.980.
 
-`_productos()` verifica que las líneas sumen la base imponible. Cuando no cuadran **no
-reparte el importe a ojo**: manda una sola línea por la base real, que es el dato del que
-sí estamos seguros. El desglose sigue visible en el portal y en el PDF, como información.
+La conciliación final controla que los precios con IVA incluido no inflen el
+comprobante: si productos más conceptos exceden el total del SII, se bloquea
+ese envío para revisión. El desglose sigue visible en el portal y en el PDF.
 
 No quites ese control. El desglose del PDF es informativo; la base imponible del RCV es
 el dato contable.
@@ -655,8 +706,8 @@ Los técnicos están en su sección; estos son los que no encajan en ninguna:
 
 ## 14. Pendientes, en orden
 
-1. **Que el primer documento entre en Finnegans.** Reintentar el documento usado en la prueba y leer el
-   error real, que ahora sí queda en la base y en el log.
+1. Incorporar en la bandeja una edición visible de Centros de Costo por ítem. El
+   backend ya guarda repartos por documento e ítem, pero hoy se completó por API.
 2. Confirmar con el dueño `WorkflowCodigo` y `ProductoCodigo`.
 3. Crear en Finnegans los 66 proveedores que faltan.
 4. Pedir los ejemplos de nota de crédito y factura exenta, y validar esos mapeos.

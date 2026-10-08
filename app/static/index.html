@@ -354,7 +354,9 @@
   .certificado-form label{font-size:.76rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--fs-navy);}
   .certificado-form input,.certificado-form select{width:100%;box-sizing:border-box;margin-top:5px;padding:9px 10px;border:1px solid var(--fs-steel);border-radius:8px;font:inherit;}
   .certificado-estado{font-size:.82rem;padding:10px 12px;border-radius:9px;background:rgba(10,47,67,.07);line-height:1.4;}
-  .gear-btn{margin-left:auto;font-size:1.15rem;line-height:1;padding:.42em .55em;}
+  .header-tools{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex:none;}
+  .header-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;font-size:1.2rem;line-height:1;text-decoration:none;}
+  .equivalencias-btn{font-size:1.45rem;font-weight:700;}
 
   /* ---------- Toast ---------- */
   .toast{
@@ -371,6 +373,7 @@
     .empresa-bar{flex-direction:column; align-items:stretch;}
     .kpis{grid-template-columns:repeat(2,1fr);}
     .header-row{flex-direction:column;}
+    .header-tools{margin-left:0;align-self:flex-end;}
     .sync-block{align-items:flex-start; width:100%;}
     .sync-block .btn{width:100%; justify-content:center;}
     .titular{font-size:1.9rem;}
@@ -400,9 +403,11 @@
     <span class="section-pill">Documentos SII</span>
     <span class="app-version" id="appVersion" title="Versión del portal"></span>
     <span class="perfil-activo" id="perfilActivo" hidden title="Certificado SII activo"></span>
-    <a class="link-btn" href="/equivalencias" title="Administrar equivalencias de productos">Equivalencias</a>
     <button class="link-btn cerrar-sesion" id="logoutBtn" type="button" hidden>Salir</button>
-    <button class="link-btn gear-btn" id="certificadosBtn" type="button" title="Configurar certificados SII" aria-label="Configurar certificados SII">⚙</button>
+    <div class="header-tools">
+      <a class="link-btn header-icon equivalencias-btn" href="/equivalencias" title="Administrar equivalencias de productos" aria-label="Administrar equivalencias de productos">=</a>
+      <button class="link-btn header-icon" id="certificadosBtn" type="button" title="Configurar certificados SII" aria-label="Configurar certificados SII">⚙</button>
+    </div>
     <svg class="lockup" viewBox="0 0 520 100" role="img" aria-label="Fisterra">
       <title>Fisterra</title>
       <g transform="translate(0,4) scale(0.92)">
@@ -590,6 +595,12 @@
     if(n === null || n === undefined) return "—";
     return "$" + Math.round(n).toLocaleString("es-CL");
   }
+  function fmtAjuste(n){
+    return "$" + n.toLocaleString("es-CL", {
+      minimumFractionDigits: Number.isInteger(n) ? 0 : 4,
+      maximumFractionDigits: 8
+    });
+  }
   function fmtFecha(iso){
     if(!iso) return "—";
     var d = iso.slice(0,10).split("-");
@@ -630,7 +641,8 @@
         mostrarLogin(true);
       }
       return res.json().catch(function(){ return {}; }).then(function(data){
-        return { ok: res.ok, status: res.status, data: data };
+        return { ok: res.ok, status: res.status, data: data,
+                 ajusteImporteExento: res.headers.get("X-Ajuste-Importe-Exento") };
       });
     });
   }
@@ -1311,7 +1323,7 @@
     // Se arma el JSON del primero antes de habilitar el envío: si falta un parámetro de
     // imputación o el proveedor no existe en Finnegans, se ve acá y no después de haber
     // escrito medio lote en el ERP.
-    apiFetch("/api/documents/" + elegidos[0].id + "/finnegans").then(function(r){
+    apiFetch("/api/documents/" + elegidos[0].id + "/finnegans", {cache:"no-store"}).then(function(r){
       if(!r.ok){
         aviso.textContent = "No se puede enviar: " + (r.data.detail || ("error " + r.status));
         json.textContent = "—";
@@ -1322,6 +1334,12 @@
         "Se registran en <strong>" + esc(r.data.EmpresaCodigo) + "</strong>" +
         " (circuito " + esc(r.data.WorkflowCodigo) + ")." +
         " Esto escribe en Finnegans y no se puede deshacer desde el portal.";
+      var ajuste = Number(r.ajusteImporteExento || 0);
+      if(ajuste > 0){
+        aviso.innerHTML += "<br>El primer documento incluye " + fmtAjuste(ajuste) +
+          " en líneas exentas adicionales. Revisá el JSON antes de enviar.";
+        document.getElementById("confirmJsonBox").open = true;
+      }
       ok.disabled = false;
     });
   }
@@ -1401,7 +1419,7 @@
 
     var pre = document.getElementById("errorJson");
     pre.textContent = "Cargando…";
-    apiFetch("/api/documents/" + id + "/finnegans").then(function(r){
+    apiFetch("/api/documents/" + id + "/finnegans", {cache:"no-store"}).then(function(r){
       // Pueden haber cerrado el modal y abierto otro documento mientras cargaba.
       if(errorJsonId !== id) return;
       pre.textContent = r.ok
