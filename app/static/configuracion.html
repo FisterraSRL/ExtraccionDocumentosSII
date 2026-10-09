@@ -2,7 +2,7 @@
 <html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administración de certificados digitales</title>
 <style>
 :root{font-family:Montserrat,Segoe UI,Arial,sans-serif;color:#0a2f43;background:#eef1f3}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1050px;margin:34px auto;padding:0 20px}.tag{color:#f52125;font-weight:700;text-transform:uppercase;font-size:.78rem}h1{margin:.35rem 0 .5rem}p{line-height:1.5}.layout{display:grid;grid-template-columns:300px 1fr;gap:20px}.card{background:#fff;padding:24px;border-radius:15px;box-shadow:0 8px 28px #0a2f4320}.lista{display:flex;flex-direction:column;gap:8px}.perfil{border:1px solid #c8d4db;background:#f5f7f8;border-radius:9px;padding:12px;text-align:left;color:#0a2f43;cursor:pointer;font:inherit}.perfil.activo{border-color:#f52125;background:#fff1f1}.perfil strong,.perfil small{display:block}.perfil small{margin-top:4px;color:#627888}.nuevo,.btn{border:0;border-radius:9px;padding:12px;font:inherit;font-weight:700;cursor:pointer}.nuevo{width:100%;margin-bottom:14px;background:#0a2f43;color:#fff}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.campo{display:flex;flex-direction:column;margin:0 0 15px;font-weight:700}.full{grid-column:1/-1}.campo input{margin-top:6px;padding:11px;border:1px solid #a8b4c4;border-radius:8px;font:inherit}.ayuda{font-size:.78rem;color:#627888;font-weight:400;margin-top:5px}.acciones{display:flex;gap:10px;flex-wrap:wrap}.primario{background:#f52125;color:#fff}.secundario{background:#e7eef2;color:#0a2f43}.estado,.mensaje{padding:11px 13px;border-radius:8px;background:#e7eef2}.error{background:#fbe1e1;color:#9c3032}.ok{background:#e1f2e8;color:#156544}.secreto{display:flex;gap:7px}.secreto input{flex:1}.mostrar{margin-top:6px;padding:0 10px;border:1px solid #a8b4c4;background:#fff;border-radius:8px;color:#0a2f43;cursor:pointer}.volver{display:inline-block;margin-top:20px;color:#0a2f43;font-weight:700}@media(max-width:760px){.layout,.form-grid{grid-template-columns:1fr}.full{grid-column:auto}}
-.perfil.activo{border-color:#c8d4db;background:#f5f7f8}.perfil.seleccionado{border:2px solid #f52125;background:#fff1f1;box-shadow:0 0 0 2px #f5212520}.uso{display:inline-block;margin-top:7px;padding:2px 7px;border-radius:20px;background:#dcebe6;color:#156544;font-size:.72rem;font-weight:700}
+.perfil.activo{border-color:#c8d4db;background:#f5f7f8}.perfil.seleccionado{border:2px solid #f52125;background:#fff1f1;box-shadow:0 0 0 2px #f5212520}.uso{display:inline-block;margin-top:7px;padding:2px 7px;border-radius:20px;background:#dcebe6;color:#156544;font-size:.72rem;font-weight:700}.vencido{display:block;margin-top:6px;color:#9c3032;font-size:.78rem;font-weight:700}.btn:disabled{opacity:.55;cursor:not-allowed}
 </style>
 <main class="wrap"><p class="tag">Configuración local</p><h1>Administración de certificados digitales</h1><p>Consultá y administrá los certificados usados para ingresar al SII. Cada perfil conserva su sesión por separado.</p>
 <div class="layout"><aside class="card"><button class="nuevo" id="nuevo">+ Nuevo certificado</button><h2>Certificados existentes</h2><div class="lista" id="lista"><p class="estado">Cargando certificados…</p></div></aside>
@@ -11,7 +11,7 @@
 <label class="campo full">Archivo .pfx o .p12<input id="archivo" type="file" accept=".pfx,.p12,application/x-pkcs12"><span class="ayuda" id="archivoAyuda"></span></label>
 <label class="campo">Contraseña del certificado<div class="secreto"><input id="password" type="password" autocomplete="new-password"><button class="mostrar" id="mostrarPassword" type="button">Mostrar</button></div><span class="ayuda">Dejá vacío para conservar la contraseña actual.</span></label>
 <label class="campo">Client_ID<div class="secreto"><input id="clientId" type="password" autocomplete="off"><button class="mostrar" id="mostrarClientId" type="button">Mostrar</button></div><span class="ayuda">Dejá vacío para conservar el valor actual.</span></label>
-<label class="campo">Client_Secret<div class="secreto"><input id="clientSecret" type="password" autocomplete="new-password"></div><span class="ayuda" id="secretAyuda"></span></label>
+<label class="campo">Client_Secret<div class="secreto"><input id="clientSecret" type="password" autocomplete="new-password"><button class="mostrar" id="mostrarClientSecret" type="button">Mostrar</button></div><span class="ayuda" id="secretAyuda"></span></label>
 </div><div class="acciones"><button class="btn primario" id="guardar">Guardar cambios</button><button class="btn secundario" id="activar" type="button">Usar este certificado</button></div></form><p id="mensaje" class="mensaje" hidden></p></section></div><a class="volver" href="/">← Volver a la bandeja</a></main>
 <script>
 const $=id=>document.getElementById(id);let actual=null,nuevo=false;
@@ -32,8 +32,10 @@ function lista(datos){
     boton.type='button';boton.dataset.id=perfil.id;
     boton.className='perfil'+(perfil.id===datos.activo?' activo':'');
     boton.innerHTML='<strong>'+esc(perfil.nombre)+'</strong><small>'+esc(perfil.rut)+
-      (perfil.client_secret_configurado?' · Finnegans configurado':'')+'</small>'+
-      (perfil.id===datos.activo?'<span class="uso">En uso</span>':'');
+      (perfil.client_id_configurado&&perfil.client_secret_configurado
+        ?' · Finnegans configurado':' · Falta configurar Finnegans')+'</small>'+
+      (perfil.id===datos.activo?'<span class="uso">En uso</span>':'')+
+      (perfil.certificado_vencido?'<span class="vencido">Vencido el '+esc(perfil.certificado_vigente_hasta)+'</span>':'');
     boton.onclick=()=>cargar(perfil.id);
     $('lista').append(boton);
   });
@@ -41,7 +43,7 @@ function lista(datos){
   marcarSeleccion();
 }
 async function refrescar(){const d=await api('/api/configuracion/sii');lista(d);return d}
-const camposSensibles={password:'mostrarPassword',clientId:'mostrarClientId',clientSecret:null};
+const camposSensibles={password:'mostrarPassword',clientId:'mostrarClientId',clientSecret:'mostrarClientSecret'};
 function prepararCampo(id,configurado){
   const entrada=$(id),boton=$(camposSensibles[id]);
   entrada.value='';entrada.placeholder=configurado?'********':'';
@@ -72,6 +74,7 @@ function nuevoPerfil(){
   $('form').reset();actual=null;nuevo=true;$('titulo').textContent='Nuevo certificado';
   marcarSeleccion();
   $('estado').hidden=true;$('form').hidden=false;$('activar').hidden=true;
+  $('activar').disabled=false;
   $('archivo').required=true;$('password').required=true;
   Object.keys(camposSensibles).forEach(id=>prepararCampo(id,false));
   $('archivoAyuda').textContent='Seleccioná el archivo del nuevo certificado.';
@@ -89,10 +92,14 @@ async function cargar(id){
     $('estado').hidden=true;$('form').hidden=false;$('nombre').value=p.nombre;
     $('rut').value=p.rut;$('archivo').value='';$('archivo').required=false;
     $('password').required=false;$('activar').hidden=false;
+    $('activar').disabled=Boolean(p.certificado_vencido||p.certificado_aun_no_vigente);
     prepararCampo('password',p.password_configurada);
     prepararCampo('clientId',p.client_id_configurado);
     prepararCampo('clientSecret',p.client_secret_configurado);
-    $('archivoAyuda').textContent=p.certificado_configurado?'Archivo configurado. Vacío conserva el actual.':'Falta el archivo.';
+    $('archivoAyuda').textContent=p.certificado_vencido
+      ?'Certificado vencido el '+p.certificado_vigente_hasta+'. Cargá uno renovado para poder usar este perfil.'
+      :p.certificado_aun_no_vigente?'Este certificado todavía no está vigente.'
+      :p.certificado_configurado?'Archivo configurado. Vacío conserva el actual.':'Falta el archivo.';
     $('secretAyuda').textContent=p.client_secret_configurado?'Client_Secret configurado. Vacío conserva el actual.':'Client_Secret no configurado.';
     aviso('');
   }catch(e){aviso(e.message,'error')}
@@ -102,10 +109,19 @@ $('nuevo').onclick=nuevoPerfil;
 Object.keys(camposSensibles).forEach(id=>{$(id).addEventListener('input',()=>{$(id).dataset.estado='nuevo'})});
 $('mostrarPassword').onclick=()=>mostrarCampo('password','password').catch(e=>aviso(e.message,'error'));
 $('mostrarClientId').onclick=()=>mostrarCampo('clientId','client_id').catch(e=>aviso(e.message,'error'));
+$('mostrarClientSecret').onclick=()=>mostrarCampo('clientSecret','client_secret').catch(e=>aviso(e.message,'error'));
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)Object.keys(camposSensibles).forEach(ocultarCampo);
 });
-$('activar').onclick=async()=>{try{await api('/api/configuracion/sii/seleccionar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({perfil:actual})});location.href='/'}catch(e){aviso(e.message,'error')}};
+$('activar').onclick=async()=>{
+  const boton=$('activar');boton.disabled=true;boton.textContent='Actualizando empresas…';aviso('');
+  try{
+    await api('/api/configuracion/sii/seleccionar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({perfil:actual})});
+    try{await api('/api/empresas/asegurar',{method:'POST'})}
+    catch(e){throw Error('El certificado quedó seleccionado, pero no se pudieron actualizar sus empresas: '+e.message)}
+    location.href='/';
+  }catch(e){aviso(e.message,'error');boton.disabled=false;boton.textContent='Usar este certificado'}
+};
 function valorEditado(id){return $(id).dataset.estado==='nuevo'?$(id).value:null}
 $('form').onsubmit=async e=>{
   e.preventDefault();$('guardar').disabled=true;

@@ -47,7 +47,7 @@ import re
 import tempfile
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -124,7 +124,7 @@ class SIIAuthenticationError(RuntimeError):
     """El navegador terminó el flujo de login pero la sesión no quedó iniciada."""
 
 
-class SIICertificateError(RuntimeError):
+class SIICertificateError(SIIAuthenticationError):
     """El .pfx no se pudo leer con la contraseña dada, o el archivo no es un certificado válido."""
 
 
@@ -178,6 +178,19 @@ class SIIClient:
             raise SIICertificateError(
                 "El archivo cargó pero no contiene clave privada y certificado juntos "
                 "(esperado en un .pfx exportado desde el navegador o la autoridad certificadora)."
+            )
+
+        ahora = datetime.now(timezone.utc)
+        if ahora > certificate.not_valid_after_utc:
+            raise SIICertificateError(
+                "El certificado digital seleccionado está vencido desde el "
+                f"{certificate.not_valid_after_utc.date().isoformat()}. "
+                "Cargá un certificado renovado en Configuración."
+            )
+        if ahora < certificate.not_valid_before_utc:
+            raise SIICertificateError(
+                "El certificado digital seleccionado todavía no está vigente. "
+                f"Comienza el {certificate.not_valid_before_utc.date().isoformat()}."
             )
 
         key_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption())
@@ -446,6 +459,11 @@ class SIIClient:
                 page.wait_for_load_state("networkidle", timeout=timeout)
 
             texto = page.inner_text("body")
+            if "certificate expired" in texto.lower():
+                raise SIIAuthenticationError(
+                    "El SII rechazó el certificado digital por vencimiento. "
+                    "Revisá su vigencia y cargá uno renovado en Configuración."
+                )
             rut_plano = self.rut.replace(".", "").replace("-", "")
             autenticado = "Cerrar Sesión" in texto or rut_plano[:8] in texto.replace(".", "").replace("-", "")
             if not autenticado:

@@ -82,7 +82,8 @@ def guardar_centros_costo(
 
     if centros:
         try:
-            cliente = FinnegansClient()
+            _, client_id, client_secret = configuracion_sii.credenciales_finnegans_activas(perfil_id)
+            cliente = FinnegansClient(perfil_id, client_id, client_secret)
             for item in centros:
                 detalle = cliente._pedir("GET", "centroCosto/" + quote(item["codigo"], safe=""))
                 if not isinstance(detalle, dict) or detalle.get("Activo") is False:
@@ -90,7 +91,9 @@ def guardar_centros_costo(
                         status_code=422,
                         detail=f"El Centro de Costo {item['codigo']} no está activo.",
                     )
-        except FinnegansConfigError as exc:
+        except configuracion_sii.PerfilActivoCambiadoError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (FinnegansConfigError, configuracion_sii.ConfiguracionSIIError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except FinnegansAPIError as exc:
             raise HTTPException(
@@ -129,10 +132,12 @@ def sincronizar_productos(
     db: Session = Depends(get_db),
 ):
     try:
-        _, client_id, client_secret = configuracion_sii.credenciales_finnegans_activas()
+        _, client_id, client_secret = configuracion_sii.credenciales_finnegans_activas(perfil_id)
         resultado = productos.sincronizar(db, perfil_id, client_id, client_secret)
         response.headers["Cache-Control"] = "no-store"
         return resultado
+    except configuracion_sii.PerfilActivoCambiadoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except configuracion_sii.ConfiguracionSIIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ErrorCatalogoFinnegans as exc:

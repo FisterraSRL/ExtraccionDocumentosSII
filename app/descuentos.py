@@ -6,7 +6,7 @@ control del PDF y al armado de las líneas adicionales para Finnegans.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_FLOOR
 import re
 
 
@@ -64,6 +64,57 @@ def _porcentaje(valor: object, bruto: Decimal, subtotal: Decimal) -> Decimal:
     raise DescuentoNoConciliado(
         f"el porcentaje impreso ({porcentaje} %) no explica el subtotal del ítem"
     )
+
+
+def precios_con_iva_incluido(
+    items: list[dict], neto: object, iva: object, exento: object,
+    total: object, descuento_global: object = None,
+) -> bool:
+    """Reconoce solo comprobantes afectos cuyos subtotales impresos suman el total con IVA.
+
+    No se infiere esta condición de una diferencia aislada: deben cuadrar la cabecera
+    y todos los subtotales, sin descuentos globales ni ítems negativos ambiguos.
+    """
+    if not items or descuento_global:
+        return False
+    try:
+        neto_d = _decimal(neto, "el neto")
+        iva_d = _decimal(iva, "el IVA")
+        exento_d = _decimal(exento, "el exento")
+        total_d = _decimal(total, "el total")
+        subtotales = [
+            _decimal(item.get("subtotal"), "el subtotal") for item in items
+        ]
+    except DescuentoNoConciliado:
+        return False
+    tolerancia = max(Decimal(1), Decimal(len(items)) / 2)
+    return bool(
+        neto_d > 0 and iva_d > 0 and exento_d == 0
+        and all(subtotal >= 0 for subtotal in subtotales)
+        and any(subtotal > 0 for subtotal in subtotales)
+        and abs(neto_d + iva_d - total_d) <= Decimal(1)
+        and abs(sum(subtotales) - total_d) <= tolerancia
+        and abs(sum(subtotales) - neto_d) > tolerancia
+    )
+
+
+def distribuir_iva_incluido(items: list[dict], iva: object) -> tuple[Decimal, ...]:
+    """Reparte el IVA informado por el SII según los subtotales, sin perder centavos."""
+    impuesto = _decimal(iva, "el IVA")
+    subtotales = [_decimal(item.get("subtotal"), "el subtotal") for item in items]
+    base = sum(subtotales)
+    if impuesto <= 0 or base <= 0 or any(valor < 0 for valor in subtotales):
+        raise DescuentoNoConciliado("No se pudo distribuir el IVA incluido entre los ítems.")
+    unidad = Decimal(1) if impuesto == impuesto.to_integral_value() else Decimal(1).scaleb(impuesto.as_tuple().exponent)
+    cuotas = [impuesto * valor / base for valor in subtotales]
+    partes = [(cuota / unidad).to_integral_value(rounding=ROUND_FLOOR) * unidad for cuota in cuotas]
+    faltan = int((impuesto - sum(partes)) / unidad)
+    orden = sorted(range(len(items)), key=lambda indice: cuotas[indice] - partes[indice], reverse=True)
+    for indice in orden[:faltan]:
+        partes[indice] += unidad
+    if sum(partes) != impuesto:
+        raise DescuentoNoConciliado("No se pudo conciliar el reparto del IVA incluido.")
+    return tuple(partes)
 
 
 def analizar_descuentos(

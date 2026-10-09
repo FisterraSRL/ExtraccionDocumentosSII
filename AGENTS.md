@@ -4,7 +4,7 @@ Todo lo que hace falta para seguir trabajando en este repo sin haber visto las
 conversaciones anteriores. Leelo entero antes de tocar código: hay varias trampas que
 cuestan horas si se descubren solas, y están todas anotadas acá abajo.
 
-Última revisión: **07-oct-2026**. Si encontrás algo que ya no es cierto, corregilo en
+Última revisión: **09-oct-2026**. Si encontrás algo que ya no es cierto, corregilo en
 vez de dejarlo: este archivo solo sirve si se puede confiar en él.
 
 ---
@@ -73,12 +73,14 @@ usado en las pruebas quedó marcado como enviado y un GET posterior confirmó qu
 Finnegans lo guardó con el importe de control correcto y tres líneas de producto. La
 cuenta de compra del producto elegido exige distribuir el 100 % en la dimensión
 Centros de Costo (`DIMCTC`); la cuenta, el producto y el proveedor no tenían
-distribución predeterminada. El usuario eligió Administración (código 5) al 100 %
-para todos los productos cuya cuenta de compra requiere Centros de Costo. La
-vista previa y el envío consultan `CuentaDimension` de la cuenta de compra en
-Finnegans y aplican 5 solo si contiene `DIMCTC`; una distribución manual del
-ítem prevalece. Las líneas de descuento global usan la cuenta de su propio
-producto, no la del primer ítem.
+distribución predeterminada. Durante el período de pruebas, por decisión del
+usuario, **todas las líneas de `Productos` usan `DIMCTC`, centro 5 al 100 %**,
+incluidos descuentos y ajustes. Esto prevalece temporalmente sobre las
+distribuciones manuales guardadas. La consulta de `CuentaDimension` se conserva
+para detectar si un producto además requiere Bien de Uso (`DIMBU`). Solo esas líneas,
+incluidos sus descuentos y ajustes, agregan `DIMBU`, bien `EPRUEB-001` al 100 %.
+Si no se pueden leer las dimensiones de la cuenta, la vista previa y el envío se
+bloquean en vez de omitir una dimensión requerida.
 `DimensionDistribucion` va dentro de cada producto; con `tipoCalculo: "2"` recibe
 `distribucionItems` con `codigo` y `porcentaje` que sumen 100. Fuente:
 https://bc.finneg.com/t/como-llamar-un-metodo-post-de-una-transaccion/2907
@@ -145,11 +147,12 @@ GET    /api/documents                filtros: empresa, estado, tipo, q
 GET    /api/documents/{id}/pdf       representación impresa del SII
 GET    /api/documents/{id}/finnegans el JSON que se enviaría, sin enviarlo
 POST   /api/documents/{id}/send      envía uno
-POST   /api/documents/send           envía la selección  {"ids": [...]}
+POST   /api/documents/send           envía la selección  {"ids": [...], "perfil_esperado": "..."}
 POST   /api/documents/{id}/habilitar-reenvio  deja pendiente tras confirmar baja en Finnegans
 GET    /api/empresas
 PATCH  /api/empresas/{rut}           nombre manual
 POST   /api/empresas/refrescar
+POST   /api/empresas/asegurar       consulta SII solo si el perfil no tiene lista guardada
 POST   /api/sync                     empresa, periodo, meses, con_items,
                                      reprocesar_items, descargar_pdf
 GET    /api/productos/estado         cantidad local del perfil activo
@@ -198,6 +201,11 @@ lado del cliente:
    El `.pfx` de E-CERTCHILE usa un algoritmo que OpenSSL 3 rechaza, así que `pfxPath`
    falla: hay que pasarle los **PEM** que `_load_pkcs12()` ya produce
    (`certPath` / `keyPath`), contra el origen `https://herculesr.sii.cl`.
+
+Antes de activar un perfil o iniciar un nuevo login, se comprueba localmente la vigencia
+del certificado contenido en el `.pfx`. Un certificado vencido no se activa ni se sube
+como nuevo; la pantalla muestra la fecha de vencimiento. Esta comprobación no contacta
+al SII y evita gastar intentos de autenticación con un certificado rechazado por TLS.
 
 El flujo, por si hay que volver a depurarlo:
 
@@ -289,6 +297,14 @@ El RCV lista las 55 empresas representadas **solo por RUT**: `razonSocONombreEmp
 (`get_empresas_con_nombre()`), que cubre 30. Para el resto está el nombre manual
 (`PATCH /api/empresas/{rut}`), que **siempre manda** sobre el automático. Las empresas
 que el SII deja de listar se marcan `autorizada=False`, no se borran.
+`empresas_perfil` guarda qué empresas puede consultar cada certificado y si aparecen
+en el Portal FE; `empresas_perfil_estado` distingue una consulta sin empresas de un
+perfil todavía no consultado. Al pulsar **Usar este certificado**, la bandeja usa la
+lista guardada de ese perfil o la obtiene del SII una sola vez si falta. Un cambio de
+perfil limpia la selección y los documentos visibles antes de cargarla. Los perfiles
+ya consultados nunca heredan la lista de otro certificado. Se reutiliza la sesión SII
+existente: no se fuerza un login en cada cambio de perfil. `POST /api/empresas/refrescar`
+sigue disponible para forzar una consulta nueva.
 
 ### Ítems: se leen del PDF
 
@@ -354,8 +370,11 @@ PDF, esté guardado o haya que ir a buscarlo".
 nuestro caso. El dueño del proyecto dijo al principio "factura de venta" y lo corrigió
 cuando se le señaló.
 
-**Autenticación:** `GET /oauth/token?grant_type=client_credentials&client_id=…&client_secret=…`
-devuelve el token en **texto plano**, no JSON. Va después como `Authorization: Bearer`.
+**Autenticación:** cada cliente Finnegans recibe el `Client_ID` y `Client_Secret`
+del certificado SII activo. Pide el token con `POST /oauth/token`, el ID en el cuerpo
+y el secreto en el encabezado; acepta token en texto plano o JSON. Lo usa como
+`Authorization: Bearer`. Nunca leer credenciales globales de `.env` ni incluirlas en
+URLs, logs o mensajes de error.
 
 **Mapeos comprobados contra la instancia real:**
 
@@ -363,7 +382,10 @@ devuelve el token en **texto plano**, no JSON. Va después como `Authorization: 
   Nosotros lo guardamos sin puntos → `formatear_rut()`.
 - **Empresa**: `empresaChile/{codigo}` expone el RUT en `NumeroIdentificacion`, lo que
   permite cruzarla automáticamente. Hay RUT con varios registros; se toma el activo de
-  código más bajo y se deja constancia en el log.
+  código más bajo y se deja constancia en el log. `empresaChile/list` no trae el RUT:
+  en la instancia actual lista 208 empresas, por lo que sus detalles se consultan con
+  concurrencia acotada y el mapa se reutiliza diez minutos por perfil y credenciales.
+  La primera vista previa puede tardar alrededor de 40 segundos; no implica un envío.
 - **Tipo de documento**: lo identifica `TransaccionSubtipoCodigo` (FC, FCEX, NCCPRA…),
   ver `SUBTIPO_POR_TIPO_SII`. `TransaccionTipoCodigo` es siempre `OPER`.
 - **Moneda**: `PES`, no `CLP`. El catálogo tiene las dos; la instancia usa `PES`.
@@ -417,16 +439,16 @@ devuelve el token en **texto plano**, no JSON. Va después como `Authorization: 
   https://bc.finneg.com/t/api-facturacompras-mensaje-error-el-importe-total-no-coincide-con-el-importe-de-control/4375
   No cambiar esa configuración del ERP desde esta aplicación. El folio de prueba
   sí quedó registrado tras corregir importes y asignar su Centro de Costo.
-- Los descuentos comprobados, sean por ítem o globales, se envían como **líneas
-  separadas con `Cantidad: -1`**, conservando cantidad y precio originales. Los
-  descuentos por ítem identifican su ítem de origen en la descripción. Para
-  documentos afectos se usa `FINNEGANS_PRODUCTO_DESCUENTO_AFECTO`; para exentos,
-  `FINNEGANS_PRODUCTO_DESCUENTO_EXENTO` y `ImporteExento` negativo. Si falta el
-  producto correspondiente o la diferencia no queda justificada por subtotales,
-  porcentaje o descuento global impreso, la vista previa y el envío se bloquean
-  con los importes comparados. Solo se agrega un redondeo pequeño cuando los
-  subtotales del PDF corroboran la base. Los documentos mixtos sin afectación por
-  ítem siguen bloqueados. Finnegans
+- Los descuentos comprobados se envían como **líneas separadas con `Cantidad: -1`**,
+  conservando cantidad y precio originales. Los descuentos por ítem usan el mismo
+  `ProductoCodigo` y Centro de Costo del ítem de origen, y la descripción identifica
+  el descuento negativo. Los descuentos globales usan
+  `FINNEGANS_PRODUCTO_DESCUENTO_AFECTO` o `_EXENTO` según corresponda; los exentos
+  llevan `ImporteExento` negativo. Si falta el producto global correspondiente o la
+  diferencia no queda justificada por subtotales, porcentaje o descuento global
+  impreso, la vista previa y el envío se bloquean con los importes comparados. Solo
+  se agrega un redondeo pequeño cuando los subtotales del PDF corroboran la base.
+  Los documentos mixtos sin afectación por ítem siguen bloqueados. Finnegans
   recomienda productos específicos con tag DESCUENTO y cantidad negativa para Chile:
   https://bc.finneg.com/t/factura-electronica-configuracion-inicial/2558
 - Para cargos por servicio público y ajustes de efectivo que exceden la base del
@@ -447,12 +469,15 @@ En el 8% de los documentos con desglose (104 de 1.287) **los ítems suman `neto 
 Mandarlos como base gravada inflaría la factura: el documento usado en la prueba habría quedado
 registrado en $33.296 en vez de $27.980.
 
-La conciliación final controla que los precios con IVA incluido no inflen el
-comprobante: si productos más conceptos exceden el total del SII, se bloquea
-ese envío para revisión. El desglose sigue visible en el portal y en el PDF.
-
-No quites ese control. El desglose del PDF es informativo; la base imponible del RCV es
-el dato contable.
+Cuando todos los subtotales del PDF suman exactamente el total del SII y coinciden
+`neto + IVA = total`, la conciliación reconoce precios con IVA incluido. Primero
+representa los descuentos por ítem comprobados; después agrega por cada ítem una
+línea negativa con el mismo producto para separar el IVA ya incluido en el precio.
+Distribuye el IVA según los subtotales y exige que la suma de las líneas resultantes
+sea exactamente el neto del RCV antes de sumar el concepto de IVA. Conserva las
+cantidades y precios originales. Si falta alguna de esas evidencias o persiste una
+diferencia, bloquea la vista previa y el envío. El desglose del PDF es informativo;
+la base imponible del RCV sigue siendo el dato contable.
 
 ### Parámetros de imputación
 
@@ -466,19 +491,24 @@ imputados. Si faltan, `construir_payload()` falla con un mensaje claro.
 | `FINNEGANS_PRODUCTO_DESCUENTO_AFECTO` | Según `.env` | Producto de descuento con imputación afecta; obligatorio solo si se detecta un descuento afecto. |
 | `FINNEGANS_PRODUCTO_DESCUENTO_EXENTO` | Vacío | Producto de descuento con imputación exenta; obligatorio solo si se detecta un descuento exento. |
 | `FINNEGANS_PRODUCTO_AJUSTE_EXENTO` | `AACZ-2048` | Gastos Comunes para compensar cargos y ajustes exentos comprobados. |
-| `FINNEGANS_CENTRO_COSTO_PREDETERMINADO` | `5` | Administración al 100 % solo si la cuenta de compra usa `DIMCTC`; una elección manual prevalece. |
-| `FINNEGANS_EMPRESA_CODIGO` | `PRUEBA39` | Empresa de prueba. Vaciar para el cruce por RUT. |
+| `FINNEGANS_CENTRO_COSTO_PREDETERMINADO` | `5` | Temporalmente inactivo: durante las pruebas todas las líneas usan `DIMCTC`, centro 5 al 100 %. |
 | `FINNEGANS_CONDICION_PAGO` | `30D` | Del documento de ejemplo. |
 | `FINNEGANS_MONEDA` | `PES` | |
 | `FINNEGANS_CONCEPTO_IVA` / `_EXENTO` | `COMPRA_IVA_19` / `ivacomexe` | |
 
-`FINNEGANS_EMPRESA_CODIGO` fija la empresa destino **para todos** los documentos, sin
-importar de qué empresa del SII sean. Está para probar sin ensuciar la contabilidad real.
-
-**Consecuencia a no olvidar:** un documento enviado a `PRUEBA39` queda marcado como
-enviado en nuestra base y después no saldría hacia la empresa que corresponde. Para eso
-está `scripts/reabrir_envios.py`, que los vuelve a dejar pendientes. **No borra nada en
-Finnegans**: los comprobantes de prueba se dan de baja desde el ERP.
+Durante el período de pruebas, **la vista previa y el envío usan `EmpresaCodigo:
+"PRUEBA39"` para todos los documentos**, por decisión explícita del usuario hasta que
+indique cambiarla. La constante está en `app/finnegans/client.py`. Las credenciales
+de API siguen siendo las del certificado activo; no se consulta el RUT del documento
+para elegir la empresa destino mientras rige esta decisión. Todas las líneas del
+JSON usan además `DIMCTC` con centro 5 al 100 %, aunque la cuenta no lo exija.
+Cuando la cuenta de compra de un producto incluye `DIMBU`, sus líneas agregan
+Bien de Uso `EPRUEB-001` al 100 % junto al centro de costo. La lectura de cuentas
+usa las credenciales Finnegans del certificado activo.
+El antiguo
+`FINNEGANS_EMPRESA_CODIGO` de `.env` no se usa. Los envíos de prueba se reabren con
+`scripts/reabrir_envios.py` tras eliminar el comprobante desde Finnegans; el script
+no lo borra en el ERP.
 
 Catálogos útiles, todos de solo lectura:
 `empresaChile`, `proveedor/list`, `producto/list`, `condicionPago/list`, `moneda/list`,
@@ -550,11 +580,13 @@ salvo Google Fonts. Identidad de marca Fisterra: Montserrat, rojo `#F52125` de a
 navy `#0A2F43`, superficies grises nunca blancas puras, "titular pareado" (línea en
 negrita roja + línea regular en navy).
 
-**El flujo es: primero la empresa, después sincronizar.** Al cambiar de empresa los
-tableros se limpian hasta que se sincronice, para que nunca se confunda lo que se está
-viendo con la empresa elegida. Sin sincronizar los KPI muestran "–", no "0": un cero
-afirmaría que la empresa no tiene documentos, y lo que pasa es que todavía no se
-consultó.
+**El flujo es: primero la empresa, después consultar sus datos guardados o sincronizar.**
+Al volver a la bandeja o cambiar de empresa, se recuperan desde la base los documentos
+de esa empresa si ya se habían sincronizado; no se vuelve a consultar el SII. Las
+asociaciones de productos se recuperan al abrir cada documento y el catálogo de
+Finnegans sigue asociado al certificado activo, no a la empresa. Si la empresa aún no
+tiene una sincronización guardada, los KPI muestran "–", no "0": un cero afirmaría
+que no tiene documentos, cuando todavía no se consultó.
 
 Funcionalidad: KPI, tabs por estado, filtro por tipo, búsqueda por proveedor/RUT/folio,
 detalle expandible con los ítems, insignia de desglose (`sí` / `parcial` / `no`), visor
@@ -659,19 +691,22 @@ de usuarios: es un portal interno.
   `.pfx`, contraseña y opcionalmente `Client_ID` / `Client_Secret` en
   `secrets/sii_certificados.json`, ignorado por Git. La lista y el detalle solo devuelven
   indicadores de campos configurados. El botón "Mostrar" permite consultar la contraseña
-  del certificado o `Client_ID`; `Client_Secret` y el token nunca se muestran. El acceso
-  está protegido por sesión y loopback; nunca registrar respuestas con secretos.
-  La sincronización de productos usa las credenciales del perfil activo. El envío de
-  facturas todavía usa las variables globales de `.env` y no consume las nuevas
-  asociaciones. `SIIClient` separa cookies y freno de login por `SII_PERFIL`; no reutilizar
-  sesiones entre perfiles.
+  del certificado, `Client_ID` o `Client_Secret` solo tras pulsarlo; al ocultar o cambiar
+  de pestaña se borra de la vista. El token nunca se muestra. El acceso está protegido
+  por sesión y loopback; nunca registrar respuestas con secretos. Catálogo, validación
+  de centros de costo, vista previa y envíos usan las credenciales del mismo perfil.
+  La vista previa fija ese perfil en la confirmación; si cambia antes del envío, el
+  backend devuelve 409. `SIIClient` separa cookies y freno de login por `SII_PERFIL`;
+  no reutilizar sesiones entre perfiles.
 - `PORTAL_SIN_LOGIN=1` saltea el login. Para desarrollo: reautenticarse cada 12 horas
   no protege nada cuando el portal escucha en la propia máquina. `sesion_automatica()`
   exige **las tres** condiciones y cada una tapa un agujero distinto: la variable
   activada, que el pedido venga de loopback (se mira `request.client.host`, el socket,
   no cabeceras que el cliente escribe) y que no estemos en serverless. Dejarla prendida
   por error no abre el portal publicado. No la aflojes para "probar desde el celular":
-  la bandeja muestra documentos tributarios de clientes.
+  la bandeja muestra documentos tributarios de clientes. Además, `requiere_sesion()`
+  rechaza `Origin` de otro host y `Sec-Fetch-Site: cross-site`: una web ajena abierta
+  en el mismo navegador no debe poder leer Client_Secret ni llamar al envío local.
 
 ---
 

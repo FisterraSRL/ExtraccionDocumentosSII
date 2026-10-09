@@ -119,6 +119,25 @@ class Empresa(Base):
         return self.nombre or self.rut
 
 
+class EmpresasPerfilEstado(Base):
+    """Indica que se consultó la lista SII, incluso si el resultado quedó vacío."""
+
+    __tablename__ = "empresas_perfil_estado"
+
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    consultado_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class EmpresaPerfil(Base):
+    """Empresa autorizada por el SII para un certificado concreto."""
+
+    __tablename__ = "empresas_perfil"
+
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    empresa_rut: Mapped[str] = mapped_column(ForeignKey("empresas.rut"), primary_key=True)
+    en_portal_fe: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 class Documento(Base):
     """Un documento traído del SII (RCV o BHE), con su detalle completo y su estado de envío."""
 
@@ -448,6 +467,7 @@ class EnviarLote(BaseModel):
     """
 
     ids: list[int]
+    perfil_esperado: str | None = None
 
 
 class ConfirmacionReenvio(BaseModel):
@@ -460,8 +480,6 @@ class EnvioLoteResult(BaseModel):
     con_error: int
     # Ya estaban enviados: no se reintentan para no duplicar el comprobante en el ERP.
     omitidos: int = 0
-    # Empresa de Finnegans en la que quedaron registrados. Importa decirlo porque
-    # durante las pruebas todos van a una empresa fija (PRUEBA39) y no a la que
-    # corresponde por RUT.
+    # Un lote puede contener varias empresas, resueltas por RUT en la cuenta activa.
     empresa_finnegans: str | None = None
     resultados: list[EnviarResult] = []

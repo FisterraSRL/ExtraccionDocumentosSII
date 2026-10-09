@@ -1,4 +1,4 @@
-"""La cuenta de compra determina si se usa Administración al 100 %."""
+"""Las dimensiones requeridas salen de la cuenta de compra del producto."""
 from dataclasses import replace
 from datetime import date
 from unittest.mock import patch
@@ -11,8 +11,8 @@ from app.routers.documents import _productos_con_centro_requerido
 
 def _cliente_con_catalogo():
     cliente = object.__new__(FinnegansClient)
-    cliente._centro_requerido_por_producto = {}
-    cliente._centro_requerido_por_cuenta = {}
+    cliente._dimensiones_por_producto = {}
+    cliente._dimensiones_por_cuenta = {}
     llamadas = []
 
     def pedir(metodo, ruta):
@@ -22,8 +22,12 @@ def _cliente_con_catalogo():
             "producto/SIN_CENTRO": {"CuentaCodigoCompra": "ACTIVO"},
             "producto/OTRO_CON_CENTRO": {"CuentaCodigoCompra": "GASTO"},
             "producto/DESCUENTO_CON_CENTRO": {"CuentaCodigoCompra": "GASTO"},
+            "producto/BIEN_USO": {"CuentaCodigoCompra": "ACTIVO_FIJO"},
             "cuenta/GASTO": {"CuentaDimension": [{"DimensionCodigo": "DIMCTC"}]},
             "cuenta/ACTIVO": {"CuentaDimension": []},
+            "cuenta/ACTIVO_FIJO": {"CuentaDimension": [
+                {"DimensionCodigo": "DIMCTC"}, {"DimensionCodigo": "DIMBU"},
+            ]},
         }
         return datos[ruta]
 
@@ -39,6 +43,58 @@ def test_lee_dimension_de_cuenta_y_reutiliza_consultas():
     assert cliente.requiere_centro_costo("CON_CENTRO") is True
     assert llamadas.count(("GET", "cuenta/GASTO")) == 1
     assert llamadas.count(("GET", "producto/CON_CENTRO")) == 1
+
+
+def test_bien_de_uso_se_detecta_solo_si_la_cuenta_lo_pide():
+    cliente, llamadas = _cliente_con_catalogo()
+    assert cliente.requiere_bien_uso("BIEN_USO") is True
+    assert cliente.requiere_centro_costo("BIEN_USO") is True
+    assert cliente.requiere_bien_uso("SIN_CENTRO") is False
+    assert cliente.requiere_bien_uso("BIEN_USO") is True
+    assert llamadas.count(("GET", "cuenta/ACTIVO_FIJO")) == 1
+    assert llamadas.count(("GET", "producto/BIEN_USO")) == 1
+
+
+def test_payload_agrega_dimensiones_a_cada_linea_segun_producto():
+    cliente, _ = _cliente_con_catalogo()
+    documento = Documento(
+        empresa_rut="00000000-0", tipo="33", folio=125,
+        proveedor_rut="11111111-1", proveedor_nombre="Prueba",
+        fecha=date(2025, 1, 2), neto=900, iva=171, exento=0, total=1071,
+        items=[
+            {"desc": "Activo con descuento", "cant": 1, "precio": 500, "subtotal": 400},
+            {"desc": "Gasto común", "cant": 1, "precio": 500, "subtotal": 500},
+        ],
+    )
+    configuracion = replace(
+        settings, finnegans_workflow="FLUJO_PRUEBA", finnegans_producto="SIN_CENTRO",
+    )
+    with patch("app.finnegans.client.settings", configuracion):
+        payload = cliente.construir_payload(
+            documento, codigos_por_indice={0: "BIEN_USO", 1: "SIN_CENTRO"},
+        )
+    productos = payload["Productos"]
+    assert len(productos) == 3
+    assert [dimension["dimensionCodigo"] for dimension in productos[0]["DimensionDistribucion"]] == [
+        "DIMCTC", "DIMBU",
+    ]
+    assert [dimension["dimensionCodigo"] for dimension in productos[1]["DimensionDistribucion"]] == [
+        "DIMCTC",
+    ]
+    assert [dimension["dimensionCodigo"] for dimension in productos[2]["DimensionDistribucion"]] == [
+        "DIMCTC", "DIMBU",
+    ]
+    for linea in productos:
+        dimensiones = {dimension["dimensionCodigo"]: dimension for dimension in linea["DimensionDistribucion"]}
+        assert dimensiones["DIMCTC"]["tipoCalculo"] == "2"
+        assert dimensiones["DIMCTC"]["distribucionItems"] == [
+            {"codigo": "5", "porcentaje": 100},
+        ]
+        if linea["ProductoCodigo"] == "BIEN_USO":
+            assert dimensiones["DIMBU"]["tipoCalculo"] == "2"
+            assert dimensiones["DIMBU"]["distribucionItems"] == [
+                {"codigo": "EPRUEB-001", "porcentaje": 100},
+            ]
 
 
 def test_no_inventa_requisito_si_faltan_datos_de_cuenta():
@@ -82,17 +138,19 @@ def test_descuento_por_item_consulta_la_cuenta_de_su_producto():
         items=[{"desc": "A", "cant": 1, "precio": 1000, "subtotal": 900}],
     )
     configuracion = replace(
-        settings, finnegans_producto="SIN_CENTRO",
+        settings, finnegans_producto="CON_CENTRO",
         finnegans_producto_descuento_afecto="DESCUENTO_CON_CENTRO",
     )
     with patch("app.routers.documents.settings", configuracion):
         assert _productos_con_centro_requerido(cliente, documento, {}, None) == {
-            "DESCUENTO_CON_CENTRO"
+            "CON_CENTRO"
         }
 
 
 if __name__ == "__main__":
     test_lee_dimension_de_cuenta_y_reutiliza_consultas()
+    test_bien_de_uso_se_detecta_solo_si_la_cuenta_lo_pide()
+    test_payload_agrega_dimensiones_a_cada_linea_segun_producto()
     test_no_inventa_requisito_si_faltan_datos_de_cuenta()
     test_resuelve_los_productos_del_documento_y_del_descuento()
     test_descuento_por_item_consulta_la_cuenta_de_su_producto()

@@ -5,8 +5,9 @@ Los documentos que extraemos del SII son **compras recibidas**, así que van al 
 venta (`/facturaVenta`, `/facturaVentaChile`) piden `Cliente` y son para documentos que
 la empresa emite: no es nuestro caso.
 
-Autenticación: `GET /oauth/token?grant_type=client_credentials&client_id=…&client_secret=…`
-devuelve un token en **texto plano** (no JSON). Se manda después como
+Autenticación: `POST /oauth/token` con `client_id` en el cuerpo y `Client_Secret`
+en el encabezado, tomados del certificado activo. Acepta token en texto plano o JSON.
+Se manda después como
 `Authorization: Bearer <token>`. También se acepta `?ACCESS_TOKEN=`, pero el header evita
 que el token quede escrito en URLs y logs.
 
@@ -32,8 +33,10 @@ las líneas van en `Productos` con un código del maestro.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -42,12 +45,28 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.config import settings
-from app.descuentos import DescuentoNoConciliado, analizar_descuentos
+from app.descuentos import (
+    DescuentoNoConciliado, analizar_descuentos, distribuir_iva_incluido,
+    precios_con_iva_incluido,
+)
 from app.models import Documento
 
 log = logging.getLogger(__name__)
+
+# Destino temporal de pruebas indicado por el usuario. La vista previa y el envío
+# comparten construir_payload(), por lo que ambos muestran y usan el mismo código.
+EMPRESA_CODIGO_PRUEBA = "PRUEBA39"
+CENTRO_COSTO_PRUEBA = "5"
+BIEN_USO_PRUEBA = "EPRUEB-001"
+
+# La lista no incluye RUT: resolver 208 empresas por detalle en cada vista previa
+# demoraba minutos. La copia dura solo lo necesario para revisar y enviar un lote.
+_empresas_cache: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = {}
+_empresas_cache_lock = threading.Lock()
+_EMPRESAS_CACHE_SEGUNDOS = 10 * 60
 
 PATRON_IE = re.compile(
     r"\bIE\s*Base\s*:\s*([+-]?[\d.,]+)\s*[-–]?\s*IE\s*Variable\s*:\s*([+-]?[\d.,]+)",
@@ -168,6 +187,7 @@ def _agregar_lineas_de_ajuste(documento: Documento, payload: dict,
     def agregar_linea(
         importe: Decimal, descripcion: str, es_exento: bool,
         codigo: str | None = None, copiar_centro: bool = True,
+        indice_origen: int = 0,
     ) -> None:
         if not importe:
             return
@@ -183,12 +203,16 @@ def _agregar_lineas_de_ajuste(documento: Documento, payload: dict,
             ) if es_exento else 0,
             "Descripcion": descripcion,
         }
-        if copiar_centro and productos[0].get("DimensionDistribucion"):
-            linea["DimensionDistribucion"] = deepcopy(productos[0]["DimensionDistribucion"])
+        if copiar_centro and productos[indice_origen].get("DimensionDistribucion"):
+            linea["DimensionDistribucion"] = deepcopy(productos[indice_origen]["DimensionDistribucion"])
         productos.append(linea)
 
     if documento.items:
-        base_esperada = neto + exento
+        base_contable = neto + exento
+        iva_en_precios = precios_con_iva_incluido(
+            documento.items, neto, iva, exento, total, descuento_global,
+        )
+        base_esperada = total if iva_en_precios else base_contable
         try:
             conciliacion = analizar_descuentos(
                 documento.items, base_esperada, descuento_global,
@@ -202,7 +226,7 @@ def _agregar_lineas_de_ajuste(documento: Documento, payload: dict,
             settings.finnegans_producto_descuento_exento if es_exento
             else settings.finnegans_producto_descuento_afecto
         )
-        if any(d.origen in ("item", "global") for d in conciliacion.descuentos) and not codigo_descuento:
+        if any(d.origen == "global" for d in conciliacion.descuentos) and not codigo_descuento:
             variable = (
                 "FINNEGANS_PRODUCTO_DESCUENTO_EXENTO" if es_exento
                 else "FINNEGANS_PRODUCTO_DESCUENTO_AFECTO"
@@ -225,8 +249,11 @@ def _agregar_lineas_de_ajuste(documento: Documento, payload: dict,
                 descripcion = str(documento.items[descuento.indice].get("desc") or "").strip()
                 codigo_item = str(documento.items[descuento.indice].get("codigo") or "").strip()
                 referencia = f" ({codigo_item})" if codigo_item else ""
-                etiqueta = f"Descuento ítem {descuento.indice + 1}{referencia}: {descripcion}"[:200]
-                codigo_linea = codigo_descuento
+                etiqueta = (
+                    f"Descuento -${descuento.importe} ítem {descuento.indice + 1}"
+                    f"{referencia}: {descripcion}"
+                )[:200]
+                codigo_linea = productos[descuento.indice]["ProductoCodigo"]
                 linea_exenta = es_exento
             elif descuento.origen == "ajuste_exento":
                 etiqueta = descuento.evidencia
@@ -241,14 +268,34 @@ def _agregar_lineas_de_ajuste(documento: Documento, payload: dict,
                 linea_exenta = es_exento
             agregar_linea(
                 -descuento.importe, etiqueta, linea_exenta,
-                codigo=codigo_linea, copiar_centro=False,
+                codigo=codigo_linea, copiar_centro=descuento.origen == "item",
+                indice_origen=descuento.indice if descuento.origen == "item" else 0,
             )
+
+        if iva_en_precios:
+            try:
+                iva_por_item = distribuir_iva_incluido(documento.items, iva)
+            except DescuentoNoConciliado as exc:
+                raise FinnegansMapeoError(f"Folio {documento.folio}: {exc}") from exc
+            for indice, importe in enumerate(iva_por_item):
+                agregar_linea(
+                    -importe,
+                    f"IVA incluido en precio del ítem {indice + 1}: -${importe}",
+                    es_exento=False,
+                    codigo=productos[indice]["ProductoCodigo"],
+                    indice_origen=indice,
+                )
 
         base_productos = sum(
             _importe(linea["Cantidad"]) * _importe(linea["Precio"])
             for linea in productos
         )
-        diferencia_base = base_esperada - base_productos
+        diferencia_base = base_contable - base_productos
+        if iva_en_precios and diferencia_base:
+            raise FinnegansMapeoError(
+                f"Folio {documento.folio}: el descuento y el IVA incluido no conciliaron "
+                f"la base neta del SII; diferencia ${diferencia_base}."
+            )
         if diferencia_base:
             # El importe impreso por ítem puede estar redondeado a pesos. La
             # conciliación ya comprobó que el remanente es pequeño y que los
@@ -346,25 +393,24 @@ def formatear_rut(rut: str) -> str:
 
 
 class FinnegansClient:
-    def __init__(self) -> None:
-        if not settings.finnegans_client_id or not settings.finnegans_client_secret:
+    def __init__(self, perfil_id: str, client_id: str, client_secret: str) -> None:
+        if not perfil_id or not client_id or not client_secret:
             raise FinnegansConfigError(
-                "Faltan FINNEGANS_CLIENT_ID y/o FINNEGANS_CLIENT_SECRET en .env."
+                "Completá Client_ID y Client_Secret del certificado activo en Configuración."
             )
+        self.perfil_id = perfil_id
+        self._client_id = client_id
+        self._client_secret = client_secret
         self.base = (settings.finnegans_api_url or "https://api.finneg.com/api").rstrip("/")
         self._token: str | None = None
         self._token_vence: float = 0.0
         self._empresas_por_rut: dict[str, str] | None = None
-        self._centro_requerido_por_producto: dict[str, bool] = {}
-        self._centro_requerido_por_cuenta: dict[str, bool] = {}
+        self._dimensiones_por_producto: dict[str, frozenset[str]] = {}
+        self._dimensiones_por_cuenta: dict[str, frozenset[str]] = {}
 
-    def requiere_centro_costo(self, codigo_producto: str) -> bool:
-        """Consulta la cuenta de compra del producto, sin modificar Finnegans.
-
-        Una cuenta con la dimensión DIMCTC requiere distribuir sus líneas. El
-        resultado se conserva durante la vista previa o el lote de envíos actual.
-        """
-        if codigo_producto not in self._centro_requerido_por_producto:
+    def dimensiones_de_compra(self, codigo_producto: str) -> frozenset[str]:
+        """Lee y cachea las dimensiones de la cuenta de compra del producto."""
+        if codigo_producto not in self._dimensiones_por_producto:
             ruta = "producto/" + urllib.parse.quote(codigo_producto, safe="")
             try:
                 producto = self._pedir("GET", ruta)
@@ -374,28 +420,32 @@ class FinnegansClient:
                         f"El producto {codigo_producto} no tiene cuenta de compra en Finnegans. "
                         "Revisá su imputación antes de enviar."
                     )
-                if cuenta not in self._centro_requerido_por_cuenta:
+                if cuenta not in self._dimensiones_por_cuenta:
                     detalle = self._pedir(
                         "GET", "cuenta/" + urllib.parse.quote(str(cuenta), safe="")
                     )
                     if not isinstance(detalle, dict) or not isinstance(detalle.get("CuentaDimension"), list):
                         raise FinnegansMapeoError(
-                            f"No se pudo determinar si la cuenta {cuenta} requiere Centro de Costo."
+                            f"No se pudo determinar qué dimensiones requiere la cuenta {cuenta}."
                         )
-                    self._centro_requerido_por_cuenta[cuenta] = any(
-                        dimension.get("DimensionCodigo") == "DIMCTC"
+                    self._dimensiones_por_cuenta[cuenta] = frozenset(
+                        str(dimension["DimensionCodigo"])
                         for dimension in detalle["CuentaDimension"]
-                        if isinstance(dimension, dict)
+                        if isinstance(dimension, dict) and dimension.get("DimensionCodigo")
                     )
-                self._centro_requerido_por_producto[codigo_producto] = (
-                    self._centro_requerido_por_cuenta[cuenta]
-                )
+                self._dimensiones_por_producto[codigo_producto] = self._dimensiones_por_cuenta[cuenta]
             except FinnegansAPIError as exc:
                 raise FinnegansMapeoError(
                     f"No se pudo consultar la cuenta de compra del producto {codigo_producto} "
-                    "para verificar su Centro de Costo. Intentá nuevamente."
+                    "para verificar sus dimensiones. Intentá nuevamente."
                 ) from exc
-        return self._centro_requerido_por_producto[codigo_producto]
+        return self._dimensiones_por_producto[codigo_producto]
+
+    def requiere_centro_costo(self, codigo_producto: str) -> bool:
+        return "DIMCTC" in self.dimensiones_de_compra(codigo_producto)
+
+    def requiere_bien_uso(self, codigo_producto: str) -> bool:
+        return "DIMBU" in self.dimensiones_de_compra(codigo_producto)
 
     # ---------- Transporte ----------
 
@@ -404,21 +454,35 @@ class FinnegansClient:
         en cada llamada."""
         if self._token and time.time() < self._token_vence:
             return self._token
-        query = urllib.parse.urlencode({
+        cuerpo = urllib.parse.urlencode({
             "grant_type": "client_credentials",
-            "client_id": settings.finnegans_client_id,
-            "client_secret": settings.finnegans_client_secret,
-        })
+            "client_id": self._client_id,
+        }).encode("utf-8")
+        solicitud = urllib.request.Request(
+            f"{self.base}/oauth/token", data=cuerpo, method="POST",
+            headers={
+                "Authorization": f"Basic {self._client_secret}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
         try:
-            with urllib.request.urlopen(f"{self.base}/oauth/token?{query}", timeout=45) as r:
+            with urllib.request.urlopen(solicitud, timeout=45) as r:
                 token = r.read().decode("utf-8").strip()
         except urllib.error.HTTPError as exc:
             raise FinnegansAPIError(
-                f"No se pudo autenticar contra Finnegans: HTTP {exc.code} "
-                f"{exc.read().decode('utf-8', 'replace')[:160]}"
-            ) from exc
-        if not token or len(token) < 10:
-            raise FinnegansAPIError(f"Finnegans devolvió un token inesperado: {token[:40]!r}")
+                f"Finnegans rechazó la autenticación (HTTP {exc.code}). "
+                "Revisá Client_ID y Client_Secret del certificado activo."
+            ) from None
+        except urllib.error.URLError:
+            raise FinnegansAPIError("No se pudo conectar con Finnegans para obtener el token.") from None
+        try:
+            respuesta = json.loads(token)
+        except json.JSONDecodeError:
+            respuesta = None
+        if isinstance(respuesta, dict):
+            token = respuesta.get("access_token", "")
+        if not isinstance(token, str) or len(token) < 10:
+            raise FinnegansAPIError("Finnegans respondió sin un token válido.")
         self._token = token
         self._token_vence = time.time() + 20 * 60  # margen amplio, se revalida sola
         return token
@@ -462,24 +526,53 @@ class FinnegansClient:
         activo de código más bajo, que es el original, y se deja constancia en el log.
         """
         if self._empresas_por_rut is None:
-            self._empresas_por_rut = {}
-            candidatos: dict[str, list[str]] = {}
-            for empresa in self.catalogo("empresaChile"):
-                codigo = str(empresa.get("codigo") or "")
-                if not codigo:
-                    continue
-                detalle = self._pedir("GET", f"empresaChile/{urllib.parse.quote(codigo)}")
-                if not isinstance(detalle, dict) or not detalle.get("Activo"):
-                    continue
-                clave = re.sub(r"[^0-9kK]", "", str(detalle.get("NumeroIdentificacion") or "")).upper()
-                if clave:
-                    candidatos.setdefault(clave, []).append(codigo)
-            for clave, codigos in candidatos.items():
-                orden = sorted(codigos, key=lambda c: (not c.isdigit(), int(c) if c.isdigit() else 0))
-                if len(orden) > 1:
-                    log.info("El RUT %s tiene varias empresas en Finnegans (%s); se usa %s",
-                             clave, ", ".join(orden), orden[0])
-                self._empresas_por_rut[clave] = orden[0]
+            firma = hashlib.sha256(
+                (self._client_id + "\0" + self._client_secret).encode("utf-8")
+            ).hexdigest()
+            clave_cache = (self.perfil_id, firma, self.base)
+            with _empresas_cache_lock:
+                anterior = _empresas_cache.get(clave_cache)
+                if anterior and anterior[0] > time.monotonic():
+                    self._empresas_por_rut = anterior[1].copy()
+            if self._empresas_por_rut is None:
+                empresas = self.catalogo("empresaChile")
+                # Obtener un solo token antes de abrir hilos evita autenticaciones
+                # simultáneas; cada petición individual usa ese mismo token.
+                self._autenticar()
+
+                def leer_empresa(empresa: dict) -> tuple[str, dict | str | None]:
+                    codigo = str(empresa.get("codigo") or "")
+                    if not codigo:
+                        return "", None
+                    detalle = self._pedir(
+                        "GET", f"empresaChile/{urllib.parse.quote(codigo)}", timeout=30
+                    )
+                    return codigo, detalle
+
+                candidatos: dict[str, list[str]] = {}
+                with ThreadPoolExecutor(max_workers=6) as ejecutor:
+                    trabajos = [ejecutor.submit(leer_empresa, empresa) for empresa in empresas]
+                    for trabajo in as_completed(trabajos):
+                        codigo, detalle = trabajo.result()
+                        if not isinstance(detalle, dict) or not detalle.get("Activo"):
+                            continue
+                        clave = re.sub(
+                            r"[^0-9kK]", "", str(detalle.get("NumeroIdentificacion") or "")
+                        ).upper()
+                        if clave:
+                            candidatos.setdefault(clave, []).append(codigo)
+                mapa = {}
+                for clave, codigos in candidatos.items():
+                    orden = sorted(codigos, key=lambda c: (not c.isdigit(), int(c) if c.isdigit() else 0))
+                    if len(orden) > 1:
+                        log.info("El RUT %s tiene varias empresas en Finnegans (%s); se usa %s",
+                                 clave, ", ".join(orden), orden[0])
+                    mapa[clave] = orden[0]
+                self._empresas_por_rut = mapa
+                with _empresas_cache_lock:
+                    _empresas_cache[clave_cache] = (
+                        time.monotonic() + _EMPRESAS_CACHE_SEGUNDOS, mapa.copy()
+                    )
 
         clave = re.sub(r"[^0-9kK]", "", rut_empresa or "").upper()
         codigo = self._empresas_por_rut.get(clave)
@@ -519,6 +612,9 @@ class FinnegansClient:
 
         No manda nada: sirve para revisar qué se enviaría antes de escribir en el ERP.
         """
+        # Las distribuciones guardadas por ítem se conservan para cuando termine el
+        # período de pruebas, pero hoy no deben alterar la imputación uniforme a 5.
+        centros_por_indice = None
         subtipo = SUBTIPO_POR_TIPO_SII.get(documento.tipo)
         if not subtipo:
             raise FinnegansMapeoError(
@@ -548,11 +644,7 @@ class FinnegansClient:
             "IdentificacionExterna": identificacion,
             "Nombre": f"{subtipo} - {documento.folio}",
             "Descripcion": documento.proveedor_nombre[:200],
-            "EmpresaCodigo": (
-                empresa_codigo
-                or settings.finnegans_empresa_codigo
-                or self.empresa_para_rut(documento.empresa_rut)
-            ),
+            "EmpresaCodigo": empresa_codigo or EMPRESA_CODIGO_PRUEBA,
             "Fecha": fecha,
             "FechaComprobante": fecha,
             "Proveedor": formatear_rut(documento.proveedor_rut),
@@ -594,12 +686,17 @@ class FinnegansClient:
             payload["CHL_FolioRef"] = str(documento.folio_doc_ref)
             payload["CHL_FechaRef"] = fecha
         _agregar_lineas_de_ajuste(documento, payload, descuento_global)
-        if productos_con_centro_requerido:
-            centro = [{"codigo": settings.finnegans_centro_costo_predeterminado, "porcentaje": 100}]
-            for linea in payload["Productos"]:
-                if (linea["ProductoCodigo"] in productos_con_centro_requerido
-                        and not linea.get("DimensionDistribucion")):
-                    linea["DimensionDistribucion"] = _dimension_centro_costo(centro)
+        # Mientras todos los comprobantes van a PRUEBA39, cada línea se imputa al
+        # centro de costo 5. Se hace al final para incluir descuentos, IE y ajustes.
+        centro_prueba = _dimension_centro_costo([
+            {"codigo": CENTRO_COSTO_PRUEBA, "porcentaje": 100},
+        ])[0]
+        for linea in payload["Productos"]:
+            otras_dimensiones = [
+                dimension for dimension in linea.get("DimensionDistribucion", [])
+                if dimension.get("dimensionCodigo") != "DIMCTC"
+            ]
+            linea["DimensionDistribucion"] = otras_dimensiones + [deepcopy(centro_prueba)]
         # El IE va en una línea exenta; el concepto exento debe reflejar la misma
         # base para que Finnegans no recalcule una clasificación inconsistente.
         base_exenta = sum(
@@ -610,6 +707,21 @@ class FinnegansClient:
             else float(base_exenta)
         )
         _validar_total_control(documento, payload)
+        con_bien_uso = {
+            linea["ProductoCodigo"] for linea in payload["Productos"]
+            if self.requiere_bien_uso(linea["ProductoCodigo"])
+        }
+        bien_uso_prueba = {
+            "dimensionCodigo": "DIMBU", "distribucionCodigo": "",
+            "tipoCalculo": "2",
+            "distribucionItems": [{"codigo": BIEN_USO_PRUEBA, "porcentaje": 100}],
+        }
+        for linea in payload["Productos"]:
+            if linea["ProductoCodigo"] in con_bien_uso:
+                linea["DimensionDistribucion"] = [
+                    dimension for dimension in linea["DimensionDistribucion"]
+                    if dimension.get("dimensionCodigo") != "DIMBU"
+                ] + [deepcopy(bien_uso_prueba)]
         return payload
 
     def _productos(self, documento: Documento, neto: float, iva: float, exento: float,

@@ -359,7 +359,8 @@
   .certificado-estado{font-size:.82rem;padding:10px 12px;border-radius:9px;background:rgba(10,47,67,.07);line-height:1.4;}
   .header-tools{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex:none;}
   .header-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;font-size:1.2rem;line-height:1;text-decoration:none;}
-  .equivalencias-btn{font-size:1.45rem;font-weight:700;}
+  .header-icon img{display:block;width:24px;height:24px;object-fit:contain;mix-blend-mode:multiply;}
+  .header-icon:hover img{opacity:.72;}
 
   /* ---------- Toast ---------- */
   .toast{
@@ -408,8 +409,8 @@
     <span class="perfil-activo" id="perfilActivo" hidden title="Certificado SII activo"></span>
     <button class="link-btn cerrar-sesion" id="logoutBtn" type="button" hidden>Salir</button>
     <div class="header-tools">
-      <a class="link-btn header-icon equivalencias-btn" href="/equivalencias" title="Administrar equivalencias de productos" aria-label="Administrar equivalencias de productos">=</a>
-      <button class="link-btn header-icon" id="certificadosBtn" type="button" title="Configurar certificados SII" aria-label="Configurar certificados SII">⚙</button>
+      <a class="link-btn header-icon equivalencias-btn" href="/equivalencias" title="Administrar equivalencias de productos" aria-label="Administrar equivalencias de productos"><img src="/equivalencias-icon.png" alt="" width="24" height="24"></a>
+      <button class="link-btn header-icon" id="certificadosBtn" type="button" title="Configurar certificados SII" aria-label="Configurar certificados SII"><img src="/configuracion-icon.jpg" alt="" width="24" height="24"></button>
     </div>
     <svg class="lockup" viewBox="0 0 520 100" role="img" aria-label="Fisterra">
       <title>Fisterra</title>
@@ -637,9 +638,10 @@
   var filters = { estado:"todos", tipo:"todos", q:"" };
   var empresas = [];
   var empresaActual = localStorage.getItem("empresaActual") || "";
-  // Los tableros arrancan en blanco y solo se llenan al sincronizar: asi nunca se
-  // confunde lo que se está viendo con la empresa que está elegida.
+  // Una empresa ya sincronizada se recupera de la base al volver a la bandeja.
+  // Una empresa sin datos previos sigue mostrando los tableros en blanco.
   var sincronizado = false;
+  var consultaDocumentos = 0;
   var toastTimer = null;
   var loading = true;
   // Hay un envio en curso: el boton queda bloqueado para no mandar la misma seleccion
@@ -647,6 +649,8 @@
   var enviando = false;
   var reenvioDocumentoId = null;
   var habilitandoReenvio = false;
+  var perfilConfirmado = null;
+  var consultaConfirmacion = null;
 
   var tbody = document.getElementById("tbody");
 
@@ -661,7 +665,8 @@
       }
       return res.json().catch(function(){ return {}; }).then(function(data){
         return { ok: res.ok, status: res.status, data: data,
-                 ajusteImporteExento: res.headers.get("X-Ajuste-Importe-Exento") };
+                 ajusteImporteExento: res.headers.get("X-Ajuste-Importe-Exento"),
+                 perfilFinnegans: res.headers.get("X-Perfil-Finnegans") };
       });
     });
   }
@@ -681,7 +686,9 @@
       var opcion = document.createElement("option");
       opcion.value = perfil.id;
       opcion.textContent = perfil.nombre + " · " + perfil.rut +
-        (perfil.certificado_configurado ? "" : " (archivo no disponible)");
+        (perfil.certificado_configurado ? "" : " (archivo no disponible)") +
+        (perfil.client_id_configurado && perfil.client_secret_configurado
+          ? "" : " · Finnegans sin credenciales");
       opcion.selected = perfil.id === datos.activo;
       selector.appendChild(opcion);
     });
@@ -711,10 +718,16 @@
       mostrarEstadoCertificados(r.data);
       cargarPerfilActivo();
       asociacionesCache.clear();
+      perfilConfirmado = null;
       cargarEstadoProductos();
       empresaActual = "";
       try { localStorage.removeItem("empresaActual"); } catch(err){}
-      return loadEmpresas().then(limpiarTableros);
+      empresas = [];
+      limpiarTableros();
+      return apiFetch("/api/empresas/asegurar", {method:"POST"}).then(function(actualizadas){
+        if(!actualizadas.ok) throw new Error(actualizadas.data.detail || "No se pudieron actualizar las empresas del certificado.");
+        return loadEmpresas();
+      });
     });
   }
 
@@ -753,6 +766,7 @@
   }
 
   function limpiarTableros(){
+    consultaDocumentos++;
     docs = [];
     sincronizado = false;
     loading = false;
@@ -807,7 +821,7 @@
       mostrarLogin(false);
       loadVersion();
       cargarPerfilActivo();
-      return loadEmpresas().then(limpiarTableros);
+      return loadEmpresas().then(restaurarBandeja);
     });
   }
 
@@ -829,7 +843,7 @@
   }
 
   function loadEmpresas(){
-    return apiFetch("/api/empresas").then(function(r){
+    return apiFetch("/api/empresas", {cache:"no-store"}).then(function(r){
       empresas = (r.ok && r.data) ? r.data : [];
       // Si la empresa recordada ya no está, caer en la primera con documentos.
       if(!empresas.some(function(e){ return e.rut === empresaActual; })){
@@ -878,24 +892,43 @@
   }
 
   function loadDocuments(){
+    var consulta = ++consultaDocumentos;
+    var empresaConsultada = empresaActual;
     loading = true;
     asociacionesCache.clear();
     renderAll();
     var url = "/api/documents" + (empresaActual ? "?empresa=" + encodeURIComponent(empresaActual) : "");
     return apiFetch(url).then(function(r){
+      if(consulta !== consultaDocumentos || empresaConsultada !== empresaActual) return null;
       if(!r.ok){
         setConnStatus("error", "Backend respondió con error (" + r.status + ")");
         docs = [];
+        return false;
       } else {
         docs = r.data || [];
         setConnStatus("ok", "Conectado a tu backend local");
+        return true;
       }
     }).catch(function(){
+      if(consulta !== consultaDocumentos || empresaConsultada !== empresaActual) return null;
       setConnStatus("error", "No se pudo conectar con el backend. ¿Está corriendo \"uvicorn app.main:app --reload\"?");
       docs = [];
-    }).then(function(){
+      return false;
+    }).then(function(cargados){
+      if(cargados === null) return null;
       loading = false;
       renderAll();
+      return cargados;
+    });
+  }
+
+  function restaurarBandeja(){
+    limpiarTableros();
+    var empresa = empresas.find(function(e){ return e.rut === empresaActual; });
+    if(!empresa || (!empresa.ultima_sincronizacion && !empresa.documentos)) return Promise.resolve();
+    sincronizado = true;
+    return loadDocuments().then(function(cargados){
+      if(cargados === false){ sincronizado = false; renderAll(); }
     });
   }
 
@@ -1342,21 +1375,39 @@
     var aviso = document.getElementById("confirmAviso");
     var ok = document.getElementById("confirmOkBtn");
     var json = document.getElementById("confirmJson");
-    aviso.textContent = "Consultando cómo quedaría el comprobante…";
+    aviso.textContent = "Preparando la vista previa con Finnegans… La primera consulta puede tardar hasta un minuto.";
     json.textContent = "Cargando…";
+    perfilConfirmado = null;
     ok.disabled = true;
     document.getElementById("confirmJsonBox").open = false;
     document.getElementById("confirmOverlay").hidden = false;
+    if(consultaConfirmacion) consultaConfirmacion.abort();
+    var controlador = new AbortController();
+    consultaConfirmacion = controlador;
+    var esperaMaxima = setTimeout(function(){ controlador.abort(); }, 75000);
+    var inicioConsulta = Date.now();
+    var progresoConsulta = setInterval(function(){
+      if(controlador !== consultaConfirmacion || document.getElementById("confirmOverlay").hidden) return;
+      var segundos = Math.round((Date.now() - inicioConsulta) / 1000);
+      aviso.textContent = "Consultando empresas y productos en Finnegans… " + segundos + " s transcurridos.";
+    }, 10000);
 
     // Se arma el JSON del primero antes de habilitar el envío: si falta un parámetro de
     // imputación o el proveedor no existe en Finnegans, se ve acá y no después de haber
     // escrito medio lote en el ERP.
-    apiFetch("/api/documents/" + elegidos[0].id + "/finnegans", {cache:"no-store"}).then(function(r){
+    apiFetch("/api/documents/" + elegidos[0].id + "/finnegans",
+             {cache:"no-store", signal:controlador.signal}).then(function(r){
+      if(controlador !== consultaConfirmacion) return;
       if(!r.ok){
         aviso.textContent = "No se puede enviar: " + (r.data.detail || ("error " + r.status));
         json.textContent = "—";
         return;
       }
+      if(!r.perfilFinnegans){
+        aviso.textContent = "No se pudo verificar el certificado de Finnegans. Volvé a abrir la vista previa.";
+        return;
+      }
+      perfilConfirmado = r.perfilFinnegans;
       json.textContent = JSON.stringify(r.data, null, 2);
       aviso.innerHTML =
         "Se registran en <strong>" + esc(r.data.EmpresaCodigo) + "</strong>" +
@@ -1369,10 +1420,22 @@
         document.getElementById("confirmJsonBox").open = true;
       }
       ok.disabled = false;
+    }).catch(function(error){
+      if(controlador !== consultaConfirmacion) return;
+      aviso.textContent = error.name === "AbortError"
+        ? "La vista previa tardó demasiado. Revisá la conexión con Finnegans y volvé a intentar."
+        : "No se pudo consultar la vista previa: " + (error.message || "error de conexión");
+      json.textContent = "—";
+      ok.disabled = true;
+    }).finally(function(){
+      clearTimeout(esperaMaxima);
+      clearInterval(progresoConsulta);
+      if(controlador === consultaConfirmacion) consultaConfirmacion = null;
     });
   }
 
   function cerrarConfirmacion(){
+    if(consultaConfirmacion){ consultaConfirmacion.abort(); consultaConfirmacion = null; }
     document.getElementById("confirmOverlay").hidden = true;
   }
 
@@ -1430,6 +1493,11 @@
   function enviarSeleccion(){
     var elegidos = seleccionEnviable();
     if(!elegidos.length) return;
+    if(!perfilConfirmado){
+      showToast("Volvé a revisar la vista previa antes de enviar.", true);
+      return;
+    }
+    var perfilEnvio = perfilConfirmado;
     cerrarConfirmacion();
     enviando = true;
     renderEnvioPie();
@@ -1437,7 +1505,9 @@
     apiFetch("/api/documents/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: elegidos.map(function(d){ return d.id; }) })
+      body: JSON.stringify({
+        ids: elegidos.map(function(d){ return d.id; }), perfil_esperado: perfilEnvio
+      })
     }).then(function(r){
       if(!r.ok){
         showToast("No se pudo enviar: " + (r.data.detail || ("error " + r.status)), true);
@@ -1672,7 +1742,7 @@
         document.getElementById("loginPassword").value = "";
         mostrarLogin(false);
         loadVersion();
-        return loadEmpresas().then(limpiarTableros);
+        return loadEmpresas().then(restaurarBandeja);
       }
       err.hidden = false;
       err.textContent = r.data.detail || ("No se pudo ingresar (error " + r.status + ")");
@@ -1737,9 +1807,15 @@
       mostrarEstadoCertificados(r.data);
       cargarPerfilActivo();
       document.getElementById("certificadoForm").reset();
+      perfilConfirmado = null;
       empresaActual = "";
       try { localStorage.removeItem("empresaActual"); } catch(err){}
-      return loadEmpresas().then(limpiarTableros);
+      empresas = [];
+      limpiarTableros();
+      return apiFetch("/api/empresas/asegurar", {method:"POST"}).then(function(actualizadas){
+        if(!actualizadas.ok) throw new Error(actualizadas.data.detail || "No se pudieron actualizar las empresas del certificado.");
+        return loadEmpresas();
+      });
     }).then(function(){ showToast("Certificado agregado y seleccionado."); cerrarCertificados(); })
       .catch(function(error){ mostrarErrorCertificados(error.message || "No se pudo guardar el certificado."); })
       .finally(function(){ boton.disabled = false; });
@@ -1748,7 +1824,7 @@
   document.getElementById("empresaSelect").addEventListener("change", function(e){
     empresaActual = e.target.value;
     try { localStorage.setItem("empresaActual", empresaActual); } catch(err){}
-    limpiarTableros();
+    restaurarBandeja();
   });
 
   document.getElementById("renombrarBtn").addEventListener("click", function(){

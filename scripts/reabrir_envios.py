@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Vuelve a dejar pendientes documentos que figuran como enviados a Finnegans.
 
-Para qué: durante las pruebas todo se registra en una empresa de prueba (PRUEBA39, ver
-FINNEGANS_EMPRESA_CODIGO en .env). Esos documentos quedan marcados como enviados y el
+Para qué: durante las pruebas todo se registra en la empresa PRUEBA39 (configurada
+temporalmente en app/finnegans/client.py). Esos documentos quedan marcados como enviados y el
 portal no los vuelve a ofrecer, así que cuando llegue el momento de mandarlos a la
 empresa que corresponde nunca saldrían. Este script los reabre.
 

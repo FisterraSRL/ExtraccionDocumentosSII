@@ -23,11 +23,9 @@ class Settings:
     sii_cert_password: str | None = os.getenv("SII_CERT_PASSWORD")
     sii_perfil: str | None = os.getenv("SII_PERFIL")
 
-    # Finnegans (Teamplace). El token se pide con client_id + client_secret; no hay
-    # "api key" suelta, por eso la variable vieja quedó sin uso.
+    # Finnegans (Teamplace). Client_ID y Client_Secret viven en cada perfil de
+    # certificado SII; ninguna llamada al ERP usa credenciales globales de .env.
     finnegans_api_url: str = os.getenv("FINNEGANS_API_URL", "https://api.finneg.com/api")
-    finnegans_client_id: str | None = os.getenv("FINNEGANS_CLIENT_ID")
-    finnegans_client_secret: str | None = os.getenv("FINNEGANS_CLIENT_SECRET")
     # Selección automática conservadora; una segunda opción cercana la bloquea igualmente.
     finnegans_match_umbral: str = os.getenv("FINNEGANS_MATCH_UMBRAL", "0.86")
     finnegans_env: str = os.getenv("FINNEGANS_ENV", "sandbox")
@@ -48,15 +46,9 @@ class Settings:
     # Elección del usuario: compensar cargos públicos y ajustes exentos identificados
     # en el PDF con una línea negativa del producto Gastos Comunes.
     finnegans_producto_ajuste_exento: str = os.getenv("FINNEGANS_PRODUCTO_AJUSTE_EXENTO", "AACZ-2048")
-    # Elección del usuario: Administración (5) al 100 % cuando la cuenta de compra
-    # del producto exige la dimensión Centros de Costo. Una elección manual prevalece.
+    # Reservado para cuando termine la etapa de pruebas. Hoy todas las líneas se
+    # imputan a DIMCTC/5 al 100 % en construir_payload(), sin consultar la cuenta.
     finnegans_centro_costo_predeterminado: str = os.getenv("FINNEGANS_CENTRO_COSTO_PREDETERMINADO", "5")
-    # Empresa de Finnegans contra la que se registran TODOS los documentos, sin importar
-    # de qué empresa del SII sean. Está para las pruebas: con PRUEBA39 los documentos
-    # entran en la empresa de prueba de la instancia y no ensucian la contabilidad real.
-    # Vacío = cada documento va a la empresa de Finnegans cuyo RUT coincide con el de la
-    # empresa del SII, que es el comportamiento definitivo.
-    finnegans_empresa_codigo: str | None = os.getenv("FINNEGANS_EMPRESA_CODIGO")
     # "PES" y no "CLP": aunque el catálogo tiene CLP, la instancia usa PES como moneda
     # local (así viene en el documento real y en MonedaPrincipalCodigo de las empresas).
     finnegans_moneda: str = os.getenv("FINNEGANS_MONEDA", "PES")

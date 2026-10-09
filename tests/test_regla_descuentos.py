@@ -5,7 +5,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from app.config import settings
-from app.descuentos import DescuentoNoConciliado, analizar_descuentos
+from app.descuentos import DescuentoNoConciliado, analizar_descuentos, precios_con_iva_incluido
 from app.finnegans.client import FinnegansClient, FinnegansMapeoError
 from app.models import Documento
 from app.sii.pdf_dte import DetalleDTE, ItemDTE, _leer_totales, _porcentaje, _verificar
@@ -21,7 +21,7 @@ def _documento(tipo="33", *, items, neto, iva, exento=0, total=None):
     )
 
 
-def _payload(documento, descuento_global=None):
+def _payload(documento, descuento_global=None, codigos_por_indice=None, centros_por_indice=None):
     configuracion = replace(
         settings, finnegans_workflow="FLUJO_PRUEBA", finnegans_producto="ARTICULO_PRUEBA",
         finnegans_producto_descuento_afecto="DESCUENTO_AFECTO",
@@ -29,8 +29,11 @@ def _payload(documento, descuento_global=None):
         finnegans_producto_ajuste_exento="AACZ-2048",
     )
     with patch("app.finnegans.client.settings", configuracion):
-        return object.__new__(FinnegansClient).construir_payload(
+        cliente = object.__new__(FinnegansClient)
+        cliente.requiere_bien_uso = lambda codigo: False
+        return cliente.construir_payload(
             documento, empresa_codigo="EMPRESA_PRUEBA", descuento_global=descuento_global,
+            codigos_por_indice=codigos_por_indice, centros_por_indice=centros_por_indice,
         )
 
 
@@ -51,7 +54,7 @@ def test_descuento_porcentaje_y_global_coexisten_sin_duplicarse():
         ]
         descuentos = [p for p in primero["Productos"] if p["Cantidad"] < 0]
         assert [(p["ProductoCodigo"], p["Precio"]) for p in descuentos] == [
-            ("DESCUENTO_AFECTO", 100), ("DESCUENTO_AFECTO", 100),
+            ("ARTICULO_PRUEBA", 100), ("DESCUENTO_AFECTO", 100),
         ]
         assert sum(Decimal(str(p["Cantidad"])) * Decimal(str(p["Precio"]))
                    for p in primero["Productos"]) == 1300
@@ -67,7 +70,79 @@ def test_descuento_por_monto_se_infiere_solo_con_subtotal_y_cabecera():
     payload = _payload(_documento(items=items, neto=850, iva=161))
     assert payload["Productos"][1]["Cantidad"] == -1
     assert payload["Productos"][1]["Precio"] == 150
-    assert payload["Productos"][1]["Descripcion"].startswith("Descuento ítem 1")
+    assert payload["Productos"][1]["ProductoCodigo"] == payload["Productos"][0]["ProductoCodigo"]
+    assert payload["Productos"][1]["Descripcion"].startswith("Descuento -$150 ítem 1")
+
+
+def test_descuento_item_usa_producto_e_imputacion_seleccionados():
+    items = [{"desc": "Banquito de prueba", "cant": 2, "precio": 500, "subtotal": 850}]
+    centros = [{"codigo": "5", "porcentaje": 100}]
+    payload = _payload(
+        _documento(items=items, neto=850, iva=162),
+        codigos_por_indice={0: "BANQUITO"}, centros_por_indice={0: centros},
+    )
+    original, descuento = payload["Productos"]
+    assert (original["ProductoCodigo"], original["Cantidad"], original["Precio"]) == (
+        "BANQUITO", 2, 500,
+    )
+    assert (descuento["ProductoCodigo"], descuento["Cantidad"], descuento["Precio"]) == (
+        "BANQUITO", -1, 150,
+    )
+    assert descuento["DimensionDistribucion"] == original["DimensionDistribucion"]
+    assert "Descuento -$150" in descuento["Descripcion"]
+
+
+def test_subtotal_bruto_del_folio_justifica_descuento_del_item():
+    items = [
+        {"desc": "Banquito de prueba", "cant": 8, "precio": 4990, "subtotal": 29940},
+        {"desc": "Otro producto", "cant": 1, "precio": 39990, "subtotal": 39990},
+    ]
+    conciliacion = analizar_descuentos(items, 69930)
+    assert [(d.origen, d.indice, d.importe) for d in conciliacion.descuentos] == [
+        ("item", 0, Decimal(9980)),
+    ]
+    assert conciliacion.bruto_items - sum(d.importe for d in conciliacion.descuentos) == 69930
+
+
+def test_folio_con_descuento_e_iva_incluido_conserva_originales_y_concilia():
+    items = [
+        {"desc": "Banquito de prueba", "cant": 8, "precio": 4990, "subtotal": 29940},
+        {"desc": "Otro producto", "cant": 1, "precio": 39990, "subtotal": 39990},
+    ]
+    documento = _documento(items=items, neto=58765, iva=11165, total=69930)
+    centros = {0: [{"codigo": "OTRO", "porcentaje": 100}],
+               1: [{"codigo": "OTRO", "porcentaje": 100}]}
+    codigos = {0: "BANQUITO", 1: "OTRO"}
+    assert precios_con_iva_incluido(items, 58765, 11165, 0, 69930)
+    payload = _payload(documento, codigos_por_indice=codigos, centros_por_indice=centros)
+    assert payload == _payload(documento, codigos_por_indice=codigos,
+                               centros_por_indice=centros)
+    productos = payload["Productos"]
+    assert [(p["ProductoCodigo"], p["Cantidad"], p["Precio"])
+            for p in productos[:2]] == [("BANQUITO", 8, 4990), ("OTRO", 1, 39990)]
+    descuento = [p for p in productos if p["Descripcion"].startswith("Descuento")]
+    assert len(descuento) == 1
+    assert (descuento[0]["ProductoCodigo"], descuento[0]["Cantidad"],
+            descuento[0]["Precio"]) == ("BANQUITO", -1, 9980)
+    assert "-$9980" in descuento[0]["Descripcion"]
+    ajustes_iva = [p for p in productos if p["Descripcion"].startswith("IVA incluido")]
+    assert len(ajustes_iva) == 2
+    assert [(p["ProductoCodigo"], p["Cantidad"]) for p in ajustes_iva] == [
+        ("BANQUITO", -1), ("OTRO", -1),
+    ]
+    assert sum(Decimal(str(p["Precio"])) for p in ajustes_iva) == 11165
+    for linea in productos[2:]:
+        origen = productos[0] if linea["ProductoCodigo"] == "BANQUITO" else productos[1]
+        assert linea["DimensionDistribucion"] == origen["DimensionDistribucion"]
+    assert all(linea["DimensionDistribucion"] == [{
+        "dimensionCodigo": "DIMCTC", "distribucionCodigo": "", "tipoCalculo": "2",
+        "distribucionItems": [{"codigo": "5", "porcentaje": 100}],
+    }] for linea in productos)
+    assert sum(Decimal(str(p["Cantidad"])) * Decimal(str(p["Precio"]))
+               for p in productos) == 58765
+    assert payload["Conceptos"][0]["ConceptoImporte"] == 11165
+    assert payload["ImporteTotalControl"] == 69930
+    assert documento.items == items
 
 
 def test_descuento_global_ya_representado_no_se_repite():
@@ -96,7 +171,7 @@ def test_descuento_exento_reduce_producto_y_concepto_exento():
     documento = _documento("34", items=items, neto=0, iva=0, exento=900)
     payload = _payload(documento)
     assert payload["Productos"][0]["ImporteExento"] == 1000
-    assert payload["Productos"][1]["ProductoCodigo"] == "DESCUENTO_EXENTO"
+    assert payload["Productos"][1]["ProductoCodigo"] == payload["Productos"][0]["ProductoCodigo"]
     assert payload["Productos"][1]["ImporteExento"] == -100
     assert payload["Conceptos"][1]["ConceptoImporteGravado"] == 900
     assert sum(Decimal(str(p["Cantidad"])) * Decimal(str(p["Precio"]))
@@ -105,27 +180,28 @@ def test_descuento_exento_reduce_producto_y_concepto_exento():
 
 def test_diferencia_sin_evidencia_detiene_el_envio_con_importes():
     items = [{"desc": "Artículo", "cant": 1, "precio": 1190, "subtotal": 1190}]
+    assert not precios_con_iva_incluido(items, 900, 171, 0, 1071)
     try:
-        _payload(_documento(items=items, neto=1000, iva=190, total=1190))
+        _payload(_documento(items=items, neto=900, iva=171, total=1071))
     except FinnegansMapeoError as exc:
         mensaje = str(exc)
-        assert "folio 123" in mensaje and "1190" in mensaje and "1000" in mensaje
+        assert "folio 123" in mensaje and "1190" in mensaje and "900" in mensaje
         assert "diferencia sin justificar" in mensaje
     else:
-        raise AssertionError("El IVA incluido no puede convertirse en descuento")
+        raise AssertionError("Una diferencia ambigua no puede convertirse en descuento")
 
 
 def test_diferencia_sin_evidencia_no_hace_post():
     documento = _documento(
         items=[{"desc": "Artículo", "cant": 1, "precio": 1190, "subtotal": 1190}],
-        neto=1000, iva=190,
+        neto=900, iva=171,
     )
     cliente = object.__new__(FinnegansClient)
     llamadas = []
     cliente._pedir = lambda *args, **kwargs: llamadas.append(args)
+    cliente.empresa_para_rut = lambda rut: "EMPRESA_PRUEBA"
     configuracion = replace(
         settings, finnegans_workflow="FLUJO_PRUEBA", finnegans_producto="ARTICULO_PRUEBA",
-        finnegans_empresa_codigo="EMPRESA_PRUEBA",
     )
     with patch("app.finnegans.client.settings", configuracion):
         resultado = cliente.send_document(documento)
@@ -233,6 +309,9 @@ def test_cargo_reconocido_no_se_compensa_si_la_base_ya_cuadra():
 if __name__ == "__main__":
     test_descuento_porcentaje_y_global_coexisten_sin_duplicarse()
     test_descuento_por_monto_se_infiere_solo_con_subtotal_y_cabecera()
+    test_descuento_item_usa_producto_e_imputacion_seleccionados()
+    test_subtotal_bruto_del_folio_justifica_descuento_del_item()
+    test_folio_con_descuento_e_iva_incluido_conserva_originales_y_concilia()
     test_descuento_global_ya_representado_no_se_repite()
     test_descuento_global_en_subtotales_se_representa_una_sola_vez()
     test_descuento_exento_reduce_producto_y_concepto_exento()

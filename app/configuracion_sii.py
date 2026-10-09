@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cryptography.hazmat.primitives.serialization import pkcs12
@@ -25,6 +26,10 @@ _RUT = re.compile(r"^[0-9.]+-[0-9Kk]$")
 
 class ConfiguracionSIIError(RuntimeError):
     """La configuracion local del certificado no es valida."""
+
+
+class PerfilActivoCambiadoError(ConfiguracionSIIError):
+    """Otra pestaña activó otro certificado durante la operación."""
 
 
 class CertificadoDuplicadoError(ConfiguracionSIIError):
@@ -84,6 +89,37 @@ def _huella(contenido: bytes) -> str:
     return hashlib.sha256(contenido).hexdigest()
 
 
+def _vigencia(perfil: dict) -> dict:
+    """Expone solo fechas y estado; nunca devuelve la clave ni datos del certificado."""
+    try:
+        _, certificado, _ = pkcs12.load_key_and_certificates(
+            _archivo_perfil(perfil).read_bytes(), perfil["password"].encode("utf-8")
+        )
+        if certificado is None:
+            return {}
+        ahora = datetime.now(timezone.utc)
+        return {
+            "certificado_vigente_hasta": certificado.not_valid_after_utc.date().isoformat(),
+            "certificado_vencido": ahora > certificado.not_valid_after_utc,
+            "certificado_aun_no_vigente": ahora < certificado.not_valid_before_utc,
+        }
+    except Exception:
+        # Un perfil dañado no debe impedir consultar y reparar los demás.
+        return {}
+
+
+def _exigir_vigencia(certificado) -> None:
+    ahora = datetime.now(timezone.utc)
+    if ahora > certificado.not_valid_after_utc:
+        fecha = certificado.not_valid_after_utc.date().isoformat()
+        raise ConfiguracionSIIError(
+            f"El certificado digital venció el {fecha}. Cargá uno renovado para ingresar al SII."
+        )
+    if ahora < certificado.not_valid_before_utc:
+        fecha = certificado.not_valid_before_utc.date().isoformat()
+        raise ConfiguracionSIIError(f"El certificado digital todavía no es válido; comienza el {fecha}.")
+
+
 def estado() -> dict:
     datos = _leer_perfiles()
     activo = datos["activo"]
@@ -96,7 +132,8 @@ def estado() -> dict:
             {"id": identificador, "nombre": datos_perfil["nombre"], "rut": datos_perfil["rut"],
              "certificado_configurado": _archivo_perfil(datos_perfil).is_file(),
              "client_id_configurado": bool(datos_perfil.get("client_id")),
-             "client_secret_configurado": bool(datos_perfil.get("client_secret"))}
+             "client_secret_configurado": bool(datos_perfil.get("client_secret")),
+             **_vigencia(datos_perfil)}
             for identificador, datos_perfil in datos["perfiles"].items()
         ],
         "rut_configurado": bool(perfil),
@@ -122,6 +159,7 @@ def detalle(identificador: str) -> dict:
         "client_id_configurado": bool(perfil.get("client_id")),
         "client_secret_configurado": bool(perfil.get("client_secret")),
         "activo": datos.get("activo") == identificador,
+        **_vigencia(perfil),
     }
 
 
@@ -130,6 +168,7 @@ def revelar(identificador: str, campo: str) -> str:
     claves = {
         "password": "password",
         "client_id": "client_id",
+        "client_secret": "client_secret",
     }
     if campo not in claves:
         raise ConfiguracionSIIError("El campo solicitado no se puede mostrar.")
@@ -150,10 +189,16 @@ def perfil_activo_id() -> str:
     return identificador
 
 
-def credenciales_finnegans_activas() -> tuple[str, str, str]:
+def credenciales_finnegans_activas(perfil_esperado: str | None = None) -> tuple[str, str, str]:
     """Lee las credenciales del perfil activo solo para uso interno del backend."""
     datos = _leer_perfiles()
-    identificador = perfil_activo_id()
+    identificador = datos.get("activo")
+    if not identificador or identificador not in datos["perfiles"]:
+        raise ConfiguracionSIIError("Seleccioná un certificado SII en Configuración antes de continuar.")
+    if perfil_esperado is not None and identificador != perfil_esperado:
+        raise PerfilActivoCambiadoError(
+            "El certificado activo cambió. Revisá la vista previa antes de enviar a Finnegans."
+        )
     perfil = datos["perfiles"][identificador]
     client_id = perfil.get("client_id")
     client_secret = perfil.get("client_secret")
@@ -209,6 +254,7 @@ def _validar(rut: str, password: str, contenido: bytes) -> str:
         raise ConfiguracionSIIError("No se pudo abrir el certificado. Revisá el archivo y la contraseña.") from exc
     if clave is None or certificado is None:
         raise ConfiguracionSIIError("El archivo no contiene una clave privada y certificado juntos.")
+    _exigir_vigencia(certificado)
     return rut_limpio
 
 
@@ -334,4 +380,18 @@ def editar(identificador: str, nombre: str, rut: str, password: str | None,
 
 def seleccionar(identificador: str) -> dict:
     datos = _leer_perfiles()
+    perfil = datos["perfiles"].get(identificador)
+    if not perfil:
+        raise ConfiguracionSIIError("El certificado seleccionado no existe.")
+    try:
+        _, certificado, _ = pkcs12.load_key_and_certificates(
+            _archivo_perfil(perfil).read_bytes(), perfil["password"].encode("utf-8")
+        )
+    except Exception as exc:
+        raise ConfiguracionSIIError(
+            "No se pudo abrir el certificado seleccionado. Revisá el archivo y su contraseña."
+        ) from exc
+    if certificado is None:
+        raise ConfiguracionSIIError("El archivo seleccionado no contiene un certificado digital.")
+    _exigir_vigencia(certificado)
     return _activar(identificador, datos)

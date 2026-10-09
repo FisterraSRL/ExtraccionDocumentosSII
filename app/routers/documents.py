@@ -11,13 +11,14 @@ import os
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import requiere_sesion
 from app.db import get_db
 from app.finnegans.client import (
     FinnegansClient,
+    FinnegansAPIError,
     FinnegansConfigError,
     FinnegansMapeoError,
     FinnegansSendResult,
@@ -30,6 +31,8 @@ from app.models import (
     DescuentoGlobalLinea,
     Documento,
     Empresa,
+    EmpresaPerfil,
+    EmpresasPerfilEstado,
     EmpresaOut,
     EmpresaUpdate,
     DocumentoOut,
@@ -43,7 +46,7 @@ from app.models import (
     SyncResult,
 )
 from app.config import settings
-from app.descuentos import DescuentoNoConciliado, analizar_descuentos
+from app.descuentos import DescuentoNoConciliado, analizar_descuentos, precios_con_iva_incluido
 
 log = logging.getLogger(__name__)
 
@@ -116,6 +119,21 @@ def listar_documentos(
     return documentos
 
 
+def _ruts_empresas_perfil(db: Session) -> list[str] | None:
+    """None conserva la lista anterior hasta la primera consulta por perfil."""
+    perfil = settings.sii_perfil
+    if not perfil:
+        return None
+    if db.get(EmpresasPerfilEstado, perfil):
+        return list(db.execute(
+            select(EmpresaPerfil.empresa_rut).where(EmpresaPerfil.perfil_id == perfil)
+        ).scalars())
+    # Ya existe al menos un perfil consultado: uno nuevo no debe heredar sus empresas.
+    if db.execute(select(EmpresasPerfilEstado.perfil_id).limit(1)).first():
+        return []
+    return None
+
+
 @router.get("/empresas", response_model=list[EmpresaOut])
 def listar_empresas(db: Session = Depends(get_db)):
     """Empresas representadas, con cuántos documentos tiene cada una en la bandeja.
@@ -135,18 +153,27 @@ def listar_empresas(db: Session = Depends(get_db)):
             .group_by(Documento.empresa_rut)
         ).all()
     )
+    ruts_perfil = _ruts_empresas_perfil(db)
+    autorizadas = set(ruts_perfil) if ruts_perfil is not None else None
+    portales_perfil = (
+        {fila.empresa_rut: fila.en_portal_fe for fila in db.execute(
+            select(EmpresaPerfil).where(EmpresaPerfil.perfil_id == settings.sii_perfil)
+        ).scalars()}
+        if autorizadas is not None else {}
+    )
     salida = [
         EmpresaOut(
             rut=e.rut,
             nombre=e.nombre,
             nombre_mostrado=e.nombre_mostrado,
-            autorizada=e.autorizada,
-            en_portal_fe=e.en_portal_fe,
+            autorizada=True if autorizadas is not None else e.autorizada,
+            en_portal_fe=portales_perfil.get(e.rut) if autorizadas is not None else e.en_portal_fe,
             ultima_sincronizacion=e.ultima_sincronizacion,
             documentos=conteos.get(e.rut, 0),
             pendientes=pendientes.get(e.rut, 0),
         )
         for e in db.execute(select(Empresa)).scalars().all()
+        if autorizadas is None or e.rut in autorizadas
     ]
     salida.sort(key=lambda e: (e.nombre is None, (e.nombre or e.rut).lower()))
     return salida
@@ -184,6 +211,7 @@ def refrescar_empresas(db: Session = Depends(get_db)):
         rut, cert_path, password = settings.require_sii_credentials()
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    perfil_consultado = settings.sii_perfil
 
     sii = _sii()
     client = sii.SIIClient(rut, cert_path, password)
@@ -202,8 +230,16 @@ def refrescar_empresas(db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=502, detail=f"No se pudo iniciar sesión en el SII: {exc}"
         ) from exc
+    except sii.SIIRCVError as exc:
+        raise HTTPException(status_code=502, detail=f"No se pudieron consultar las empresas del SII: {exc}") from exc
     finally:
         client.close()
+
+    if settings.sii_perfil != perfil_consultado:
+        raise HTTPException(
+            status_code=409,
+            detail="El certificado activo cambió durante la consulta. Volvé a seleccionar el certificado.",
+        )
 
     conocidas = {e.rut: e for e in db.execute(select(Empresa)).scalars().all()}
     for r in ruts:
@@ -228,8 +264,27 @@ def refrescar_empresas(db: Session = Depends(get_db)):
             empresa.nombre = e["nombre"]
     for r, empresa in conocidas.items():
         empresa.en_portal_fe = r in en_fe
+    if perfil_consultado:
+        perfil = perfil_consultado
+        db.execute(delete(EmpresaPerfil).where(EmpresaPerfil.perfil_id == perfil))
+        for rut_empresa in ruts:
+            db.add(EmpresaPerfil(
+                perfil_id=perfil, empresa_rut=rut_empresa,
+                en_portal_fe=rut_empresa in en_fe,
+            ))
+        db.merge(EmpresasPerfilEstado(
+            perfil_id=perfil, consultado_at=datetime.now(timezone.utc),
+        ))
     db.commit()
     return listar_empresas(db)
+
+
+@router.post("/empresas/asegurar", response_model=list[EmpresaOut])
+def asegurar_empresas_perfil(db: Session = Depends(get_db)):
+    """Carga el perfil nuevo desde el SII una vez; después reutiliza su lista guardada."""
+    if settings.sii_perfil and db.get(EmpresasPerfilEstado, settings.sii_perfil):
+        return listar_empresas(db)
+    return refrescar_empresas(db)
 
 
 @router.get("/documents/{documento_id}/pdf")
@@ -431,13 +486,11 @@ def sincronizar(
 def _empresas_a_sincronizar(db: Session, empresa: str | None, rut_certificado: str) -> list[str]:
     """Resuelve qué empresas sincronizar: una, todas las autorizadas, o la del certificado."""
     if empresa == "todas":
-        ruts = (
-            db.execute(
+        ruts = _ruts_empresas_perfil(db)
+        if ruts is None:
+            ruts = list(db.execute(
                 select(Empresa.rut).where(Empresa.autorizada.is_(True)).order_by(Empresa.rut)
-            )
-            .scalars()
-            .all()
-        )
+            ).scalars())
         if not ruts:
             raise HTTPException(
                 status_code=409,
@@ -680,21 +733,33 @@ def _guardar_documento(db: Session, fila: dict, empresa_rut: str) -> bool:
     return True
 
 
-def _cliente_finnegans() -> FinnegansClient:
+def _cliente_finnegans(perfil_esperado: str | None = None) -> FinnegansClient:
+    # Import tardío: la API de lectura en serverless no instala cryptography.
+    from app import configuracion_sii
+
     try:
-        return FinnegansClient()
+        perfil, client_id, client_secret = configuracion_sii.credenciales_finnegans_activas(
+            perfil_esperado
+        )
+        return FinnegansClient(perfil, client_id, client_secret)
+    except configuracion_sii.PerfilActivoCambiadoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except configuracion_sii.ConfiguracionSIIError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except FinnegansConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-def _codigos_seleccionados(db: Session, documento: Documento) -> dict[int, str]:
-    """Usa las elecciones vigentes del perfil activo al previsualizar y al enviar."""
-    if not documento.items or not settings.sii_perfil:
+def _codigos_seleccionados(db: Session, documento: Documento,
+                          perfil_id: str | None = None) -> dict[int, str]:
+    """Usa las elecciones del mismo perfil que autentica contra Finnegans."""
+    perfil_id = perfil_id or settings.sii_perfil
+    if not documento.items or not perfil_id:
         return {}
     from app.productos import _firma
 
     asociaciones = db.execute(select(AsociacionItem).where(
-        AsociacionItem.perfil_id == settings.sii_perfil,
+        AsociacionItem.perfil_id == perfil_id,
         AsociacionItem.documento_id == documento.id,
     )).scalars().all()
     codigos = {}
@@ -704,7 +769,7 @@ def _codigos_seleccionados(db: Session, documento: Documento) -> dict[int, str]:
             continue
         if asociacion.descripcion_firma != _firma(documento.items[indice]):
             continue
-        producto = db.get(ProductoFinnegans, (settings.sii_perfil, asociacion.producto_codigo))
+        producto = db.get(ProductoFinnegans, (perfil_id, asociacion.producto_codigo))
         if not producto or not producto.disponible or producto.activo is False:
             raise FinnegansMapeoError(
                 f"Folio {documento.folio}: el producto seleccionado en el ítem {indice + 1} "
@@ -714,13 +779,15 @@ def _codigos_seleccionados(db: Session, documento: Documento) -> dict[int, str]:
     return codigos
 
 
-def _centros_seleccionados(db: Session, documento: Documento) -> dict[int, list[dict]]:
-    if not documento.items or not settings.sii_perfil:
+def _centros_seleccionados(db: Session, documento: Documento,
+                          perfil_id: str | None = None) -> dict[int, list[dict]]:
+    perfil_id = perfil_id or settings.sii_perfil
+    if not documento.items or not perfil_id:
         return {}
     from app.productos import _firma
 
     filas = db.execute(select(DistribucionCentroCosto).where(
-        DistribucionCentroCosto.perfil_id == settings.sii_perfil,
+        DistribucionCentroCosto.perfil_id == perfil_id,
         DistribucionCentroCosto.documento_id == documento.id,
     )).scalars().all()
     return {
@@ -742,13 +809,20 @@ def _productos_con_centro_requerido(
     }
     if documento.items:
         try:
+            base_descuentos = (
+                documento.total
+                if precios_con_iva_incluido(
+                    documento.items, documento.neto, documento.iva,
+                    documento.exento, documento.total, descuento_global,
+                ) else (documento.neto or 0) + (documento.exento or 0)
+            )
             descuentos = analizar_descuentos(
-                documento.items, (documento.neto or 0) + (documento.exento or 0),
+                documento.items, base_descuentos,
                 descuento_global, f"{documento.tipo_nombre} · folio {documento.folio}",
             ).descuentos
         except DescuentoNoConciliado as exc:
             raise FinnegansMapeoError(str(exc)) from exc
-        if any(d.origen in ("item", "global") for d in descuentos):
+        if any(d.origen == "global" for d in descuentos):
             es_exento = bool(documento.exento and not documento.neto)
             codigo_descuento = (
                 settings.finnegans_producto_descuento_exento if es_exento
@@ -797,18 +871,13 @@ def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> En
     apretar el botón.
     """
     try:
-        codigos = _codigos_seleccionados(db, documento)
-        centros = _centros_seleccionados(db, documento)
+        codigos = _codigos_seleccionados(db, documento, finnegans.perfil_id)
         descuento = _descuento_global(db, documento)
-        productos_con_centro = _productos_con_centro_requerido(
-            finnegans, documento, codigos, descuento
-        )
         resultado = finnegans.send_document(
-            documento, codigos_por_indice=codigos, centros_por_indice=centros,
+            documento, codigos_por_indice=codigos,
             descuento_global=descuento,
-            productos_con_centro_requerido=productos_con_centro,
         )
-    except FinnegansMapeoError as exc:
+    except (FinnegansMapeoError, FinnegansAPIError) as exc:
         resultado = FinnegansSendResult(ok=False, finnegans_id=None, error_detalle=str(exc))
 
     if resultado.ok:
@@ -846,23 +915,25 @@ def previsualizar_documento(documento_id: int, response: Response,
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
     finnegans = _cliente_finnegans()
     try:
-        codigos = _codigos_seleccionados(db, documento)
+        codigos = _codigos_seleccionados(db, documento, finnegans.perfil_id)
         descuento = _descuento_global(db, documento)
         payload = finnegans.construir_payload(
             documento, codigos_por_indice=codigos,
-            centros_por_indice=_centros_seleccionados(db, documento),
             descuento_global=descuento,
-            productos_con_centro_requerido=_productos_con_centro_requerido(
-                finnegans, documento, codigos, descuento
-            ),
         )
         # El JSON depende de reglas y configuración que pueden cambiar sin que cambie
         # el id del documento. Una copia HTTP anterior no sirve para decidir un envío.
         response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Perfil-Finnegans"] = finnegans.perfil_id
         response.headers["X-Ajuste-Importe-Exento"] = str(ajuste_importe_exento(documento, payload))
         return payload
     except (FinnegansMapeoError, FinnegansConfigError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FinnegansAPIError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Finnegans no respondió al consultar los datos necesarios para la vista previa. Intentá nuevamente.",
+        ) from exc
 
 
 @router.post("/documents/{documento_id}/send", response_model=EnviarResult)
@@ -935,7 +1006,7 @@ def enviar_seleccion(lote: EnviarLote, db: Session = Depends(get_db)):
     if faltan:
         log.warning("Se pidió enviar documentos inexistentes: %s", faltan)
 
-    finnegans = _cliente_finnegans()
+    finnegans = _cliente_finnegans(lote.perfil_esperado)
     resultados: list[EnviarResult] = []
     omitidos = 0
     for documento_id in lote.ids:
@@ -948,15 +1019,12 @@ def enviar_seleccion(lote: EnviarLote, db: Session = Depends(get_db)):
         resultados.append(_enviar(db, documento, finnegans))
 
     enviados = sum(1 for r in resultados if r.estado == EstadoDocumento.ENVIADO)
-    log.info(
-        "Envío a Finnegans (empresa %s): %s enviados, %s con error, %s ya estaban.",
-        settings.finnegans_empresa_codigo or "según RUT",
-        enviados, len(resultados) - enviados, omitidos,
-    )
+    log.info("Envío a Finnegans: %s enviados, %s con error, %s ya estaban.",
+             enviados, len(resultados) - enviados, omitidos)
     return EnvioLoteResult(
         enviados=enviados,
         con_error=len(resultados) - enviados,
         omitidos=omitidos,
-        empresa_finnegans=settings.finnegans_empresa_codigo,
+        empresa_finnegans=None,
         resultados=resultados,
     )

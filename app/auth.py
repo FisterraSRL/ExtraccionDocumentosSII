@@ -21,6 +21,7 @@ import hmac
 import json
 import os
 import time
+from urllib.parse import urlsplit
 
 from fastapi import Cookie, HTTPException, Request, Response
 
@@ -151,6 +152,13 @@ def requiere_sesion(
     request: Request, portal_sesion: str | None = Cookie(default=None)
 ) -> str:
     """Dependencia de FastAPI: corta el pedido si no hay sesión iniciada."""
+    # El modo local sin login y el CORS de desarrollo no deben permitir que una
+    # página ajena lea credenciales o dispare un envío mediante el navegador.
+    origen = request.headers.get("origin")
+    if origen and urlsplit(origen).netloc != request.headers.get("host"):
+        raise HTTPException(status_code=403, detail="El origen de la solicitud no está permitido.")
+    if request.headers.get("sec-fetch-site") == "cross-site":
+        raise HTTPException(status_code=403, detail="El origen de la solicitud no está permitido.")
     usuario = sesion_valida(portal_sesion) or sesion_automatica(request)
     if not usuario:
         raise HTTPException(status_code=401, detail="Hay que iniciar sesión.")

@@ -6,9 +6,12 @@ from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import delete
+from sqlalchemy.orm import Session
 from typing import Literal
 
-from app.db import init_db
+from app.db import get_db, init_db
+from app.models import EmpresaPerfil, EmpresasPerfilEstado
 from app.version import __version__
 from app import auth
 from app.routers import documents
@@ -26,10 +29,9 @@ logging.basicConfig(
 
 app = FastAPI(title="SII → Finnegans", version=__version__)
 
-# Abierto en desarrollo; restringir a los orígenes reales del portal antes de producción.
-# Nota: como el portal ahora se sirve desde esta misma app (ver más abajo), en la práctica
-# ya corre en el mismo origen — este CORS permisivo queda como red de seguridad para cuando
-# se pruebe el frontend servido aparte (p. ej. abierto directo como archivo).
+# El portal corre en el mismo origen. CORS conserva compatibilidad con consultas
+# públicas de desarrollo; auth.requiere_sesion rechaza orígenes ajenos en las rutas
+# protegidas, incluido el revelado de credenciales y los envíos al ERP.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -77,7 +79,7 @@ class SeleccionCertificado(BaseModel):
 
 
 class SolicitudRevelar(BaseModel):
-    campo: Literal["password", "client_id"]
+    campo: Literal["password", "client_id", "client_secret"]
 
 
 @app.post("/api/login")
@@ -186,12 +188,19 @@ def revelar_configuracion_sii(
 @app.patch("/api/configuracion/sii/{perfil}")
 def editar_configuracion_sii(
     perfil: str, datos: EdicionConfiguracionSII, request: Request, response: Response,
-    _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local)
+    _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local),
+    db: Session = Depends(get_db),
 ):
     try:
         response.headers["Cache-Control"] = "no-store"
-        return configuracion_sii.editar(perfil, datos.nombre, datos.rut, datos.password,
-                                        datos.certificado_b64, datos.client_id, datos.client_secret)
+        rut_anterior = configuracion_sii.detalle(perfil)["rut"]
+        resultado = configuracion_sii.editar(perfil, datos.nombre, datos.rut, datos.password,
+                                             datos.certificado_b64, datos.client_id, datos.client_secret)
+        if datos.certificado_b64 or datos.rut.strip().upper() != rut_anterior:
+            db.execute(delete(EmpresaPerfil).where(EmpresaPerfil.perfil_id == perfil))
+            db.execute(delete(EmpresasPerfilEstado).where(EmpresasPerfilEstado.perfil_id == perfil))
+            db.commit()
+        return resultado
     except configuracion_sii.CertificadoDuplicadoError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except configuracion_sii.ConfiguracionSIIError as exc:
@@ -207,6 +216,16 @@ def configuracion(request: Request, _: str = Depends(auth.requiere_sesion), __: 
 def pagina_equivalencias(request: Request, _: str = Depends(auth.requiere_sesion),
                          __: None = Depends(_solo_local)) -> FileResponse:
     return FileResponse(STATIC_DIR / "equivalencias.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/equivalencias-icon.png", include_in_schema=False)
+def icono_equivalencias() -> FileResponse:
+    return FileResponse(STATIC_DIR / "equivalencias-icon.png", media_type="image/png")
+
+
+@app.get("/configuracion-icon.jpg", include_in_schema=False)
+def icono_configuracion() -> FileResponse:
+    return FileResponse(STATIC_DIR / "configuracion-icon.jpg", media_type="image/jpeg")
 
 
 @app.get("/", include_in_schema=False)
