@@ -350,6 +350,9 @@
   .modal summary{cursor:pointer; font-size:.83rem; font-weight:600; color:var(--fs-steel-deep);}
   .modal summary:hover{color:var(--fs-ink);}
   .modal-nota{margin:8px 0 6px; font-size:.78rem; color:var(--fs-steel-deep);}
+  .reenvio-confirmacion{display:flex;align-items:flex-start;gap:10px;font-size:.84rem;line-height:1.45;font-weight:600;color:var(--fs-ink);}
+  .reenvio-confirmacion input{flex:none;margin-top:3px;}
+  .modal-actions .btn:disabled{opacity:.45;cursor:not-allowed;}
   .certificado-form{display:flex;flex-direction:column;gap:10px;}
   .certificado-form label{font-size:.76rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--fs-navy);}
   .certificado-form input,.certificado-form select{width:100%;box-sizing:border-box;margin-top:5px;padding:9px 10px;border:1px solid var(--fs-steel);border-radius:8px;font:inherit;}
@@ -555,6 +558,20 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="reenvioOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="reenvioTitle">
+    <h2 id="reenvioTitle">Habilitar reenvío</h2>
+    <div class="modal-meta" id="reenvioMeta"></div>
+    <div class="modal-aviso">Primero eliminá el comprobante en Finnegans. Esta acción solo cambia el estado en la bandeja; no borra nada en Finnegans ni envía el documento otra vez.</div>
+    <label class="reenvio-confirmacion"><input id="reenvioEliminado" type="checkbox"><span>Confirmo que el comprobante ya fue eliminado en Finnegans.</span></label>
+    <div class="modal-error" id="reenvioError" hidden></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="reenvioCancelarBtn" type="button">Cancelar</button>
+      <button class="btn btn-cta" id="reenvioConfirmarBtn" type="button" disabled>Dejar pendiente para reenviar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="certificadosOverlay" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="certificadosTitle">
     <h2 id="certificadosTitle">Certificados digitales SII</h2>
@@ -628,6 +645,8 @@
   // Hay un envio en curso: el boton queda bloqueado para no mandar la misma seleccion
   // dos veces y duplicar comprobantes en el ERP.
   var enviando = false;
+  var reenvioDocumentoId = null;
+  var habilitandoReenvio = false;
 
   var tbody = document.getElementById("tbody");
 
@@ -975,6 +994,10 @@
       if(it.derivado){
         desc += "<div class=\"item-nota\">" + esc(it.derivado) + " deducido del subtotal</div>";
       }
+      if(it.descuento_monto > 0){
+        desc += "<div class=\"item-nota\">Descuento del ítem: −" +
+          fmtCLP(it.descuento_monto) + "</div>";
+      }
       if(it.cuadra === false){
         var esperado = (it.cant || 0) * (it.precio || 0);
         desc += "<div class=\"item-alerta\">cantidad × precio = " + fmtCLP(esperado) +
@@ -991,6 +1014,10 @@
         "\"><span class=\"muted small\">Cargando productos…</span></div></td></tr>";
     }).join("");
     var totalsHtml = "";
+    if(doc.descuento_global > 0){
+      totalsHtml += "<div class=\"totals-line\"><span class=\"muted\">Descuento global (PDF)</span><b>−" + fmtCLP(doc.descuento_global) + "</b></div>";
+      totalsHtml += "<div class=\"item-nota\" style=\"text-align:right\">El envío conserva los precios originales e incorpora los descuentos comprobados en líneas separadas.</div>";
+    }
     if(doc.neto !== null && doc.neto !== undefined){
       totalsHtml += "<div class=\"totals-line\"><span class=\"muted\">Neto</span><b>" + fmtCLP(doc.neto) + "</b></div>";
     }
@@ -1110,7 +1137,8 @@
       return "<div class=\"estado-cell\"><span class=\"pill pending\"><span class=\"spinner\"></span> Enviando…</span></div>";
     }
     if(doc.estado === "enviado"){
-      return "<div class=\"estado-cell\"><span class=\"pill sent\">Enviado</span><span class=\"muted small\">" + fmtFecha(doc.fecha_envio) + "</span></div>";
+      return "<div class=\"estado-cell\"><span class=\"pill sent\">Enviado</span><span class=\"muted small\">" + fmtFecha(doc.fecha_envio) + "</span>" +
+        "<button class=\"link-btn\" data-action=\"habilitar-reenvio\" data-id=\"" + doc.id + "\" type=\"button\">Habilitar reenvío</button></div>";
     }
     if(doc.estado === "error"){
       return "<div class=\"estado-cell\"><span class=\"pill error\">Error</span>" +
@@ -1348,6 +1376,57 @@
     document.getElementById("confirmOverlay").hidden = true;
   }
 
+  function abrirReenvio(id){
+    if(enviando || habilitandoReenvio) return;
+    var doc = docs.find(function(d){ return d.id === id; });
+    if(!doc || doc.estado !== "enviado") return;
+    reenvioDocumentoId = id;
+    document.getElementById("reenvioMeta").innerHTML =
+      esc(doc.tipo_nombre || doc.tipo) + " · Folio " + esc(doc.folio) + "<br>" +
+      esc(doc.proveedor_nombre) +
+      (doc.finnegans_id ? "<br>Referencia en Finnegans: " + esc(doc.finnegans_id) : "");
+    document.getElementById("reenvioEliminado").checked = false;
+    document.getElementById("reenvioConfirmarBtn").disabled = true;
+    document.getElementById("reenvioError").hidden = true;
+    document.getElementById("reenvioOverlay").hidden = false;
+  }
+
+  function cerrarReenvio(){
+    if(habilitandoReenvio) return;
+    document.getElementById("reenvioOverlay").hidden = true;
+    reenvioDocumentoId = null;
+  }
+
+  function confirmarReenvio(){
+    var doc = docs.find(function(d){ return d.id === reenvioDocumentoId; });
+    if(!doc || habilitandoReenvio || !document.getElementById("reenvioEliminado").checked) return;
+    habilitandoReenvio = true;
+    var boton = document.getElementById("reenvioConfirmarBtn");
+    boton.disabled = true;
+    boton.textContent = "Habilitando…";
+    document.getElementById("reenvioError").hidden = true;
+    apiFetch("/api/documents/" + doc.id + "/habilitar-reenvio", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({eliminado_en_finnegans:true, finnegans_id:doc.finnegans_id})
+    }).then(function(r){
+      if(!r.ok) throw new Error(r.data.detail || ("No se pudo habilitar el reenvío (error " + r.status + ")."));
+      selected.delete(doc.id);
+      return loadDocuments().then(function(){
+        document.getElementById("reenvioOverlay").hidden = true;
+        reenvioDocumentoId = null;
+        showToast("Documento pendiente. Seleccionalo cuando quieras volver a enviarlo.");
+      });
+    }).catch(function(error){
+      var aviso = document.getElementById("reenvioError");
+      aviso.textContent = error.message || "No se pudo habilitar el reenvío.";
+      aviso.hidden = false;
+    }).finally(function(){
+      habilitandoReenvio = false;
+      boton.textContent = "Dejar pendiente para reenviar";
+      boton.disabled = !document.getElementById("reenvioEliminado").checked;
+    });
+  }
+
   function enviarSeleccion(){
     var elegidos = seleccionEnviable();
     if(!elegidos.length) return;
@@ -1511,6 +1590,8 @@
       }
     } else if(action === "view-error"){
       openErrorModal(id);
+    } else if(action === "habilitar-reenvio"){
+      abrirReenvio(id);
     }
   });
   tbody.addEventListener("change", function(e){
@@ -1705,6 +1786,14 @@
   document.getElementById("confirmOverlay").addEventListener("click", function(e){
     if(e.target.id === "confirmOverlay") cerrarConfirmacion();
   });
+  document.getElementById("reenvioEliminado").addEventListener("change", function(e){
+    document.getElementById("reenvioConfirmarBtn").disabled = !e.target.checked || habilitandoReenvio;
+  });
+  document.getElementById("reenvioCancelarBtn").addEventListener("click", cerrarReenvio);
+  document.getElementById("reenvioConfirmarBtn").addEventListener("click", confirmarReenvio);
+  document.getElementById("reenvioOverlay").addEventListener("click", function(e){
+    if(e.target.id === "reenvioOverlay") cerrarReenvio();
+  });
 
   document.getElementById("errorJsonBox").addEventListener("toggle", cargarJsonDelError);
   document.getElementById("modalCloseBtn").addEventListener("click", closeErrorModal);
@@ -1715,6 +1804,7 @@
     if(e.key !== "Escape") return;
     if(!document.getElementById("certificadosOverlay").hidden) cerrarCertificados();
     if(!document.getElementById("confirmOverlay").hidden) cerrarConfirmacion();
+    if(!document.getElementById("reenvioOverlay").hidden) cerrarReenvio();
     if(!document.getElementById("modalOverlay").hidden) closeErrorModal();
   });
 

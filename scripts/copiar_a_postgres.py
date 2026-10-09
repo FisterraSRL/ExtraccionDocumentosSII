@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copia empresas y documentos de una base a otra. Pensado para SQLite → Postgres.
+"""Copia empresas, documentos y descuentos globales de una base a otra. Pensado para SQLite → Postgres.
 
 Para qué: al pasar el portal a la nube, la base deja de ser el `sii_finnegans.db` local
 y pasa a ser un Postgres alojado. Sin esto habría que volver a sincronizar todo contra
@@ -21,7 +21,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import sessionmaker
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -29,7 +29,7 @@ sys.path.insert(0, str(RAIZ))
 
 from app.config import settings  # noqa: E402
 from app.db import Base, _url_normalizada  # noqa: E402
-from app.models import Documento, Empresa  # noqa: E402
+from app.models import DescuentoGlobalDocumento, DescuentoGlobalLinea, Documento, Empresa  # noqa: E402
 
 COLUMNAS_DOC = [c.name for c in Documento.__table__.columns if c.name != "id"]
 COLUMNAS_EMP = [c.name for c in Empresa.__table__.columns]
@@ -89,6 +89,41 @@ def main() -> int:
                 for c, v in valores.items():
                     setattr(existente, c, v)
                 docs_act += 1
+
+        destino.flush()
+        descuentos = (origen.execute(select(DescuentoGlobalDocumento)).scalars()
+                      if inspect(origen.bind).has_table("descuentos_globales_documentos") else [])
+        for ajuste in descuentos:
+            documento_origen = origen.get(Documento, ajuste.documento_id)
+            documento_destino = destino.execute(
+                select(Documento).where(
+                    Documento.empresa_rut == documento_origen.empresa_rut,
+                    Documento.tipo == documento_origen.tipo,
+                    Documento.folio == documento_origen.folio,
+                    Documento.proveedor_rut == documento_origen.proveedor_rut,
+                )
+            ).scalar_one()
+            destino.merge(DescuentoGlobalDocumento(
+                documento_id=documento_destino.id, importe=ajuste.importe,
+            ))
+        lineas_descuento = (
+            origen.execute(select(DescuentoGlobalLinea)).scalars()
+            if inspect(origen.bind).has_table("descuentos_globales_lineas") else []
+        )
+        for linea in lineas_descuento:
+            documento_origen = origen.get(Documento, linea.documento_id)
+            documento_destino = destino.execute(
+                select(Documento).where(
+                    Documento.empresa_rut == documento_origen.empresa_rut,
+                    Documento.tipo == documento_origen.tipo,
+                    Documento.folio == documento_origen.folio,
+                    Documento.proveedor_rut == documento_origen.proveedor_rut,
+                )
+            ).scalar_one()
+            destino.merge(DescuentoGlobalLinea(
+                documento_id=documento_destino.id, indice=linea.indice,
+                importe=linea.importe,
+            ))
 
         destino.commit()
         print(f"\nempresas : {empresas_nuevas} nuevas, {empresas_act} actualizadas")

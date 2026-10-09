@@ -73,8 +73,12 @@ usado en las pruebas quedó marcado como enviado y un GET posterior confirmó qu
 Finnegans lo guardó con el importe de control correcto y tres líneas de producto. La
 cuenta de compra del producto elegido exige distribuir el 100 % en la dimensión
 Centros de Costo (`DIMCTC`); la cuenta, el producto y el proveedor no tenían
-distribución predeterminada. El usuario indicó un centro de costo al 100 % para
-este folio. No extender esa elección a otros documentos sin que el usuario la haga.
+distribución predeterminada. El usuario eligió Administración (código 5) al 100 %
+para todos los productos cuya cuenta de compra requiere Centros de Costo. La
+vista previa y el envío consultan `CuentaDimension` de la cuenta de compra en
+Finnegans y aplican 5 solo si contiene `DIMCTC`; una distribución manual del
+ítem prevalece. Las líneas de descuento global usan la cuenta de su propio
+producto, no la del primer ítem.
 `DimensionDistribucion` va dentro de cada producto; con `tipoCalculo: "2"` recibe
 `distribucionItems` con `codigo` y `porcentaje` que sumen 100. Fuente:
 https://bc.finneg.com/t/como-llamar-un-metodo-post-de-una-transaccion/2907
@@ -142,6 +146,7 @@ GET    /api/documents/{id}/pdf       representación impresa del SII
 GET    /api/documents/{id}/finnegans el JSON que se enviaría, sin enviarlo
 POST   /api/documents/{id}/send      envía uno
 POST   /api/documents/send           envía la selección  {"ids": [...]}
+POST   /api/documents/{id}/habilitar-reenvio  deja pendiente tras confirmar baja en Finnegans
 GET    /api/empresas
 PATCH  /api/empresas/{rut}           nombre manual
 POST   /api/empresas/refrescar
@@ -310,6 +315,18 @@ columnas fijas no funciona; ver su docstring).
 - `scripts/recalcular_items.py` rehace el control sobre lo ya guardado **sin bajar
   ningún PDF**. `POST /api/sync?reprocesar_items=true` relee los PDF de los que sí lo
   necesitan.
+- `app/descuentos.py` concilia los ítems con la base del documento para todos los
+  tipos compatibles. Acepta descuentos por porcentaje impreso, por monto respaldado
+  por subtotal y cabecera, y uno o más descuentos globales impresos. Nunca infiere
+  un descuento solo del saldo. Los descuentos por ítem confirmados se guardan en
+  `descuento_monto`; los globales se guardan agregados en
+  `descuentos_globales_documentos` y por línea en `descuentos_globales_lineas`.
+  El envío también recalcula el análisis desde los datos originales, por lo que
+  funciona con documentos históricos sin reconsultar el SII ni duplicar líneas.
+  Si el exceso de los ítems coincide exactamente con cargos por servicio público
+  o ajustes para facilitar el pago en efectivo identificados en el PDF, los
+  clasifica como exentos y genera una compensación exenta por el mismo importe.
+  Otros excesos siguen bloqueados; no se compensan por saldo sin evidencia.
 
 ### El PDF: cuándo se baja y cuándo se guarda
 
@@ -373,7 +390,8 @@ devuelve el token en **texto plano**, no JSON. Va después como `Authorization: 
   ejemplo oficial de `facturaCompra` muestra 10 × 1500 = 15000, con 10000 en
   `ImporteExento` y 5000 de base gravada. Una diferencia positiva entre total SII
   y neto + IVA + exento se agrega como línea de producto exenta separada, nunca
-  como `ImporteExento` del ítem original. Una diferencia negativa se bloquea;
+  como `ImporteExento` del ítem original. Una diferencia negativa sin descuento
+  comprobado se bloquea;
   no se alteran cantidad, precio o IVA. Los documentos con neto y exento sin
   identificación de la afectación por ítem siguen requiriendo revisión. Solo se
   usa una línea genérica cuando no existe desglose de ítems. La vista previa
@@ -399,6 +417,25 @@ devuelve el token en **texto plano**, no JSON. Va después como `Authorization: 
   https://bc.finneg.com/t/api-facturacompras-mensaje-error-el-importe-total-no-coincide-con-el-importe-de-control/4375
   No cambiar esa configuración del ERP desde esta aplicación. El folio de prueba
   sí quedó registrado tras corregir importes y asignar su Centro de Costo.
+- Los descuentos comprobados, sean por ítem o globales, se envían como **líneas
+  separadas con `Cantidad: -1`**, conservando cantidad y precio originales. Los
+  descuentos por ítem identifican su ítem de origen en la descripción. Para
+  documentos afectos se usa `FINNEGANS_PRODUCTO_DESCUENTO_AFECTO`; para exentos,
+  `FINNEGANS_PRODUCTO_DESCUENTO_EXENTO` y `ImporteExento` negativo. Si falta el
+  producto correspondiente o la diferencia no queda justificada por subtotales,
+  porcentaje o descuento global impreso, la vista previa y el envío se bloquean
+  con los importes comparados. Solo se agrega un redondeo pequeño cuando los
+  subtotales del PDF corroboran la base. Los documentos mixtos sin afectación por
+  ítem siguen bloqueados. Finnegans
+  recomienda productos específicos con tag DESCUENTO y cantidad negativa para Chile:
+  https://bc.finneg.com/t/factura-electronica-configuracion-inicial/2558
+- Para cargos por servicio público y ajustes de efectivo que exceden la base del
+  SII, se conserva cada ítem original con `ImporteExento` igual a su importe y se
+  agrega una línea exenta negativa con el producto Gastos Comunes
+  (`FINNEGANS_PRODUCTO_AJUSTE_EXENTO`). Así el neto exento, la base gravada,
+  el IVA y el total quedan iguales a la cabecera. La compensación solo se aplica
+  si la suma exacta de esos cargos explica toda la diferencia; no se persiste
+  en `Documento.items` y no se duplica al volver a previsualizar.
 
 **`Vencimientos` no se manda.** El documento de ejemplo lo trae porque el ERP lo generó
 al grabarlo, pero armarlo desde acá significaría elegir la cuenta contable de
@@ -426,6 +463,10 @@ imputados. Si faltan, `construir_payload()` falla con un mensaje claro.
 |---|---|---|
 | `FINNEGANS_WORKFLOW` | `CENTRALIZA` | "Compras - CENTRALIZA", activo. **Sin confirmar por el dueño.** |
 | `FINNEGANS_PRODUCTO` | `GTOSGRAL` | "Gastos Generales", genérico. **Sin confirmar.** |
+| `FINNEGANS_PRODUCTO_DESCUENTO_AFECTO` | Según `.env` | Producto de descuento con imputación afecta; obligatorio solo si se detecta un descuento afecto. |
+| `FINNEGANS_PRODUCTO_DESCUENTO_EXENTO` | Vacío | Producto de descuento con imputación exenta; obligatorio solo si se detecta un descuento exento. |
+| `FINNEGANS_PRODUCTO_AJUSTE_EXENTO` | `AACZ-2048` | Gastos Comunes para compensar cargos y ajustes exentos comprobados. |
+| `FINNEGANS_CENTRO_COSTO_PREDETERMINADO` | `5` | Administración al 100 % solo si la cuenta de compra usa `DIMCTC`; una elección manual prevalece. |
 | `FINNEGANS_EMPRESA_CODIGO` | `PRUEBA39` | Empresa de prueba. Vaciar para el cruce por RUT. |
 | `FINNEGANS_CONDICION_PAGO` | `30D` | Del documento de ejemplo. |
 | `FINNEGANS_MONEDA` | `PES` | |
@@ -526,6 +567,15 @@ el botón queda bloqueado, en vez de enterarse a mitad del lote. Se puede marcar
 falló (así se reintenta); lo ya enviado no.
 
 **Nunca automático.** Requisito explícito del dueño del proyecto.
+
+**Reenvío de un documento enviado.** La bandeja ofrece "Habilitar reenvío" solo en
+documentos enviados. La persona debe eliminar primero el comprobante en Finnegans y
+confirmarlo en el diálogo; la aplicación no lo borra ni puede comprobar esa baja.
+El endpoint exige esa confirmación y la referencia vigente, conserva el identificador
+y la fecha anteriores en `historial_reenvios`, limpia los campos del envío activo y
+deja el documento pendiente. Después hay que seleccionarlo y confirmar un nuevo envío
+como cualquier otro documento. No reabrir enviados automáticamente ni marcarlos al
+sincronizar.
 
 Trampas del frontend:
 

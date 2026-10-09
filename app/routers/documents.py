@@ -26,19 +26,24 @@ from app.finnegans.client import (
 from app.models import (
     AsociacionItem,
     DistribucionCentroCosto,
+    DescuentoGlobalDocumento,
+    DescuentoGlobalLinea,
     Documento,
     Empresa,
     EmpresaOut,
     EmpresaUpdate,
     DocumentoOut,
+    ConfirmacionReenvio,
     EnvioLoteResult,
     EnviarLote,
     EnviarResult,
     EstadoDocumento,
+    HistorialReenvio,
     ProductoFinnegans,
     SyncResult,
 )
 from app.config import settings
+from app.descuentos import DescuentoNoConciliado, analizar_descuentos
 
 log = logging.getLogger(__name__)
 
@@ -101,7 +106,14 @@ def listar_documentos(
             (Documento.proveedor_nombre.ilike(like))
             | (Documento.proveedor_rut.ilike(like))
         )
-    return db.execute(stmt.order_by(Documento.fecha.desc())).scalars().all()
+    documentos = db.execute(stmt.order_by(Documento.fecha.desc())).scalars().all()
+    descuentos = {
+        fila.documento_id: fila.importe
+        for fila in db.execute(select(DescuentoGlobalDocumento)).scalars()
+    }
+    for documento in documentos:
+        documento.descuento_global = descuentos.get(documento.id)
+    return documentos
 
 
 @router.get("/empresas", response_model=list[EmpresaOut])
@@ -558,6 +570,28 @@ def _completar_items(
             continue
         documento.items = [i.como_dict() for i in detalle.items]
         documento.items_observacion = None if detalle.cuadra else detalle.observacion
+        descuento = detalle.totales.get("descuento_global")
+        registro = db.get(DescuentoGlobalDocumento, documento.id)
+        if descuento and descuento > 0:
+            if registro is None:
+                db.add(DescuentoGlobalDocumento(documento_id=documento.id, importe=descuento))
+            else:
+                registro.importe = descuento
+        elif registro is not None:
+            db.delete(registro)
+        lineas_guardadas = {
+            linea.indice: linea for linea in db.execute(select(DescuentoGlobalLinea).where(
+                DescuentoGlobalLinea.documento_id == documento.id,
+            )).scalars()
+        }
+        for indice, origen in enumerate(detalle.descuentos_globales):
+            linea = lineas_guardadas.pop(indice, None)
+            if linea is None:
+                linea = DescuentoGlobalLinea(documento_id=documento.id, indice=indice)
+                db.add(linea)
+            linea.importe = origen["importe"]
+        for sobrante in lineas_guardadas.values():
+            db.delete(sobrante)
 
 
 def _necesita_items(documento: Documento) -> bool:
@@ -697,6 +731,63 @@ def _centros_seleccionados(db: Session, documento: Documento) -> dict[int, list[
     }
 
 
+def _productos_con_centro_requerido(
+    finnegans: FinnegansClient, documento: Documento,
+    codigos_por_indice: dict[int, str], descuento_global: float | list[dict] | None,
+) -> set[str]:
+    """Verifica en las cuentas de compra qué productos necesitan DIMCTC."""
+    codigos = {
+        codigos_por_indice.get(indice) or settings.finnegans_producto
+        for indice in range(len(documento.items or []) or 1)
+    }
+    if documento.items:
+        try:
+            descuentos = analizar_descuentos(
+                documento.items, (documento.neto or 0) + (documento.exento or 0),
+                descuento_global, f"{documento.tipo_nombre} · folio {documento.folio}",
+            ).descuentos
+        except DescuentoNoConciliado as exc:
+            raise FinnegansMapeoError(str(exc)) from exc
+        if any(d.origen in ("item", "global") for d in descuentos):
+            es_exento = bool(documento.exento and not documento.neto)
+            codigo_descuento = (
+                settings.finnegans_producto_descuento_exento if es_exento
+                else settings.finnegans_producto_descuento_afecto
+            )
+            if codigo_descuento:
+                codigos.add(codigo_descuento)
+        if any(d.origen == "ajuste_exento" for d in descuentos):
+            codigos.add(settings.finnegans_producto_ajuste_exento)
+    return {codigo for codigo in codigos if codigo and finnegans.requiere_centro_costo(codigo)}
+
+
+def _descuento_global(db: Session, documento: Documento) -> float | list[dict] | None:
+    lineas = db.execute(select(DescuentoGlobalLinea).where(
+        DescuentoGlobalLinea.documento_id == documento.id,
+    ).order_by(DescuentoGlobalLinea.indice)).scalars().all()
+    if lineas:
+        return [{"importe": linea.importe} for linea in lineas]
+    registro = db.get(DescuentoGlobalDocumento, documento.id)
+    if documento.pdf_contenido is None:
+        return registro.importe if registro is not None else None
+    try:
+        # Para documentos anteriores a la tabla nueva, el PDF guardado permite
+        # reconstruir el descuento sin volver a consultar el SII.
+        from app.sii.pdf_dte import DTEPdfError, extraer_detalle
+    except ImportError:
+        # El portal serverless no instala pdfplumber; los descuentos nuevos llegan
+        # persistidos desde la máquina que sincroniza.
+        return registro.importe if registro is not None else None
+    try:
+        detalle = extraer_detalle(documento.pdf_contenido)
+        return detalle.descuentos_globales or (
+            registro.importe if registro is not None
+            else detalle.totales.get("descuento_global")
+        )
+    except DTEPdfError:
+        return registro.importe if registro is not None else None
+
+
 def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> EnviarResult:
     """Manda un documento y deja escrito en la base cómo le fue.
 
@@ -708,8 +799,14 @@ def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> En
     try:
         codigos = _codigos_seleccionados(db, documento)
         centros = _centros_seleccionados(db, documento)
+        descuento = _descuento_global(db, documento)
+        productos_con_centro = _productos_con_centro_requerido(
+            finnegans, documento, codigos, descuento
+        )
         resultado = finnegans.send_document(
-            documento, codigos_por_indice=codigos, centros_por_indice=centros
+            documento, codigos_por_indice=codigos, centros_por_indice=centros,
+            descuento_global=descuento,
+            productos_con_centro_requerido=productos_con_centro,
         )
     except FinnegansMapeoError as exc:
         resultado = FinnegansSendResult(ok=False, finnegans_id=None, error_detalle=str(exc))
@@ -749,9 +846,15 @@ def previsualizar_documento(documento_id: int, response: Response,
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
     finnegans = _cliente_finnegans()
     try:
+        codigos = _codigos_seleccionados(db, documento)
+        descuento = _descuento_global(db, documento)
         payload = finnegans.construir_payload(
-            documento, codigos_por_indice=_codigos_seleccionados(db, documento),
+            documento, codigos_por_indice=codigos,
             centros_por_indice=_centros_seleccionados(db, documento),
+            descuento_global=descuento,
+            productos_con_centro_requerido=_productos_con_centro_requerido(
+                finnegans, documento, codigos, descuento
+            ),
         )
         # El JSON depende de reglas y configuración que pueden cambiar sin que cambie
         # el id del documento. Una copia HTTP anterior no sirve para decidir un envío.
@@ -771,6 +874,40 @@ def enviar_documento(documento_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Este documento ya fue enviado.")
 
     return _enviar(db, documento, _cliente_finnegans())
+
+
+@router.post("/documents/{documento_id}/habilitar-reenvio", response_model=DocumentoOut)
+def habilitar_reenvio(documento_id: int, confirmacion: ConfirmacionReenvio,
+                      db: Session = Depends(get_db)):
+    """Permite un nuevo envío manual tras eliminar el comprobante en Finnegans."""
+    documento = db.get(Documento, documento_id, with_for_update=True)
+    if not documento:
+        raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    if documento.estado != EstadoDocumento.ENVIADO:
+        raise HTTPException(status_code=409, detail="Solo se puede habilitar el reenvío de un documento enviado.")
+    if confirmacion.finnegans_id != documento.finnegans_id:
+        raise HTTPException(status_code=409, detail="El envío del documento cambió. Actualizá la bandeja antes de continuar.")
+    if not confirmacion.eliminado_en_finnegans:
+        raise HTTPException(
+            status_code=400,
+            detail="Primero eliminá el comprobante en Finnegans y confirmá esa acción para habilitar el reenvío.",
+        )
+
+    # La aplicación no borra en Finnegans ni puede verificar esa baja. Guardamos la
+    # referencia anterior para no perder el rastro al limpiar el estado vigente.
+    db.add(HistorialReenvio(
+        documento_id=documento.id,
+        finnegans_id_anterior=documento.finnegans_id,
+        fecha_envio_anterior=documento.fecha_envio,
+        habilitado_at=datetime.now(timezone.utc),
+    ))
+    documento.estado = EstadoDocumento.PENDIENTE
+    documento.finnegans_id = None
+    documento.fecha_envio = None
+    documento.error_detalle = None
+    db.commit()
+    log.info("Reenvío habilitado para documento %s, folio %s", documento.id, documento.folio)
+    return documento
 
 
 @router.post("/documents/send", response_model=EnvioLoteResult)

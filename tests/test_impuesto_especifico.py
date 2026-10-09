@@ -27,15 +27,18 @@ def _documento(*, total=42150, items=None, neto=32407, iva=6157, exento=0) -> Do
 
 
 def _payload(documento: Documento, codigos_por_indice: dict[int, str] | None = None,
-             centros_por_indice: dict[int, list[dict]] | None = None) -> dict:
+             centros_por_indice: dict[int, list[dict]] | None = None,
+             productos_con_centro_requerido: set[str] | None = None) -> dict:
     configuracion_prueba = replace(
         settings, finnegans_workflow="FLUJO_PRUEBA", finnegans_producto="PRODUCTO_PRUEBA",
+        finnegans_producto_descuento_afecto="DESCUENTO_PRUEBA",
     )
     with patch("app.finnegans.client.settings", configuracion_prueba):
         return object.__new__(FinnegansClient).construir_payload(
             documento, empresa_codigo="EMPRESA_PRUEBA",
             codigos_por_indice=codigos_por_indice,
             centros_por_indice=centros_por_indice,
+            productos_con_centro_requerido=productos_con_centro_requerido,
         )
 
 
@@ -119,6 +122,34 @@ def test_centro_de_costo_cubre_tambien_las_lineas_de_ajuste():
     json.dumps(payload)
 
 
+def test_centro_predeterminado_solo_para_producto_que_lo_requiere():
+    documento = _documento(items=[
+        {"desc": "Gasto A", "cant": 1, "precio": 16000, "subtotal": 16000},
+        {"desc": "Gasto B", "cant": 1, "precio": 16407, "subtotal": 16407},
+    ], total=38564)
+    payload = _payload(
+        documento, {0: "REQUIERE_CENTRO", 1: "SIN_CENTRO"},
+        productos_con_centro_requerido={"REQUIERE_CENTRO"},
+    )
+    assert payload["Productos"][0]["DimensionDistribucion"][0]["distribucionItems"] == [
+        {"codigo": "5", "porcentaje": 100}
+    ]
+    assert "DimensionDistribucion" not in payload["Productos"][1]
+
+
+def test_centro_manual_prevalece_sobre_predeterminado():
+    payload = _payload(
+        _documento(), {0: "REQUIERE_CENTRO"},
+        {0: [{"codigo": "OTRO", "porcentaje": 100}]},
+        {"REQUIERE_CENTRO"},
+    )
+    assert all(
+        linea["DimensionDistribucion"][0]["distribucionItems"] == [
+            {"codigo": "OTRO", "porcentaje": 100}
+        ] for linea in payload["Productos"]
+    )
+
+
 def test_diferencia_positiva_completa_importe_exento_sin_cambiar_precio():
     documento = _documento(total=43000)
     payload = _payload(documento)
@@ -180,12 +211,14 @@ def test_precio_pdf_con_descuento_no_se_reescribe():
     documento = _documento(total=38564, items=[
         {"desc": "Producto con descuento", "cant": 2, "precio": 20000, "subtotal": 32407},
     ])
-    try:
-        _payload(documento)
-    except FinnegansMapeoError as exc:
-        assert "precios originales superan la base" in str(exc)
-    else:
-        raise AssertionError("Se compensó una diferencia negativa con exento")
+    payload = _payload(documento)
+    assert payload["Productos"][0]["Cantidad"] == 2
+    assert payload["Productos"][0]["Precio"] == 20000
+    assert payload["Productos"][1]["ProductoCodigo"] == "DESCUENTO_PRUEBA"
+    assert payload["Productos"][1]["Cantidad"] == -1
+    assert payload["Productos"][1]["Precio"] == 7593
+    assert payload["Productos"][1]["ImporteExento"] == 0
+    assert payload["ImporteTotalControl"] == 38564
     assert documento.items[0]["cant"] == 2
     assert documento.items[0]["precio"] == 20000
 
@@ -200,14 +233,18 @@ def test_diferencia_positiva_sin_ie_usa_importe_exento():
     assert ajuste_importe_exento(documento, payload) == 436
 
 
-def test_ajuste_va_al_item_con_brecha():
+def test_diferencia_positiva_sin_causa_no_se_compensa():
     documento = _documento(total=357, neto=300, iva=57, items=[
         {"desc": "Producto con diferencia", "cant": 1, "precio": 80, "subtotal": 100},
         {"desc": "Otro producto", "cant": 1, "precio": 200, "subtotal": 200},
     ])
-    payload = _payload(documento)
-    assert [item["ImporteExento"] for item in payload["Productos"]] == [0, 0, 0]
-    assert [item["Precio"] for item in payload["Productos"]] == [80, 200, 20]
+    try:
+        _payload(documento)
+    except FinnegansMapeoError as exc:
+        assert "diferencia sin justificar" in str(exc)
+        assert "$-20" in str(exc)
+    else:
+        raise AssertionError("Una brecha positiva sin causa no puede imputarse sola")
 
 
 def test_vista_previa_informa_el_ajuste_sin_alterar_el_json():
@@ -227,7 +264,9 @@ def test_vista_previa_informa_el_ajuste_sin_alterar_el_json():
     with patch("app.finnegans.client.settings", configuracion_prueba), \
          patch("app.routers.documents._cliente_finnegans", return_value=object.__new__(FinnegansClient)), \
          patch("app.routers.documents._codigos_seleccionados", return_value={}), \
-         patch("app.routers.documents._centros_seleccionados", return_value={}):
+         patch("app.routers.documents._centros_seleccionados", return_value={}), \
+         patch("app.routers.documents._productos_con_centro_requerido", return_value=set()), \
+         patch("app.routers.documents._descuento_global", return_value=None):
         payload = previsualizar_documento(1, respuesta, BasePrueba())
     assert respuesta.headers["X-Ajuste-Importe-Exento"] == "436"
     assert respuesta.headers["Cache-Control"] == "no-store"
@@ -239,6 +278,8 @@ if __name__ == "__main__":
     test_payload_conserva_el_exento_del_sii()
     test_seleccion_de_producto_llega_a_la_vista_previa()
     test_centro_de_costo_cubre_tambien_las_lineas_de_ajuste()
+    test_centro_predeterminado_solo_para_producto_que_lo_requiere()
+    test_centro_manual_prevalece_sobre_predeterminado()
     test_diferencia_positiva_completa_importe_exento_sin_cambiar_precio()
     test_ie_conserva_la_linea_correcta_y_el_redondeo()
     test_sin_ie_no_cambia_las_lineas()
@@ -246,6 +287,6 @@ if __name__ == "__main__":
     test_neto_y_exento_sin_marca_por_item_pide_revision()
     test_precio_pdf_con_descuento_no_se_reescribe()
     test_diferencia_positiva_sin_ie_usa_importe_exento()
-    test_ajuste_va_al_item_con_brecha()
+    test_diferencia_positiva_sin_causa_no_se_compensa()
     test_vista_previa_informa_el_ajuste_sin_alterar_el_json()
     print("Cálculo y conciliación del impuesto específico: OK")

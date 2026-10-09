@@ -39,6 +39,18 @@ class Settings:
     # son texto libre del emisor y no tienen código, así que van todos contra un producto
     # genérico de gastos y la descripción real queda en la línea.
     finnegans_producto: str | None = os.getenv("FINNEGANS_PRODUCTO")
+    # Producto gravado al 19 % para una línea negativa de descuento global. No se
+    # deduce del producto de los ítems: en Finnegans su imputación es distinta.
+    finnegans_producto_descuento_afecto: str | None = os.getenv("FINNEGANS_PRODUCTO_DESCUENTO_AFECTO")
+    # Un descuento exento necesita un producto con imputación exenta propia; no se
+    # reutiliza el gravado porque eso cambiaría la clasificación tributaria.
+    finnegans_producto_descuento_exento: str | None = os.getenv("FINNEGANS_PRODUCTO_DESCUENTO_EXENTO")
+    # Elección del usuario: compensar cargos públicos y ajustes exentos identificados
+    # en el PDF con una línea negativa del producto Gastos Comunes.
+    finnegans_producto_ajuste_exento: str = os.getenv("FINNEGANS_PRODUCTO_AJUSTE_EXENTO", "AACZ-2048")
+    # Elección del usuario: Administración (5) al 100 % cuando la cuenta de compra
+    # del producto exige la dimensión Centros de Costo. Una elección manual prevalece.
+    finnegans_centro_costo_predeterminado: str = os.getenv("FINNEGANS_CENTRO_COSTO_PREDETERMINADO", "5")
     # Empresa de Finnegans contra la que se registran TODOS los documentos, sin importar
     # de qué empresa del SII sean. Está para las pruebas: con PRUEBA39 los documentos
     # entran en la empresa de prueba de la instancia y no ensucian la contabilidad real.

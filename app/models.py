@@ -218,6 +218,37 @@ class Documento(Base):
         return nombre_tipo(self.tipo)
 
 
+class HistorialReenvio(Base):
+    """Conserva la referencia anterior cuando el usuario habilita otro envío."""
+
+    __tablename__ = "historial_reenvios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    documento_id: Mapped[int] = mapped_column(ForeignKey("documentos.id"), nullable=False, index=True)
+    finnegans_id_anterior: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    fecha_envio_anterior: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    habilitado_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class DescuentoGlobalDocumento(Base):
+    """Importe del descuento global leído del PDF, separado de los ítems."""
+
+    __tablename__ = "descuentos_globales_documentos"
+
+    documento_id: Mapped[int] = mapped_column(ForeignKey("documentos.id"), primary_key=True)
+    importe: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class DescuentoGlobalLinea(Base):
+    """Cada descuento global impreso; evita perder su desglose al resincronizar."""
+
+    __tablename__ = "descuentos_globales_lineas"
+
+    documento_id: Mapped[int] = mapped_column(ForeignKey("documentos.id"), primary_key=True)
+    indice: Mapped[int] = mapped_column(Integer, primary_key=True)
+    importe: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class ProductoFinnegans(Base):
     """Copia local del catálogo; el código identifica al producto en la API de Finnegans."""
 
@@ -334,6 +365,7 @@ class ItemSchema(BaseModel):
     subtotal: float | None = None
     codigo: str | None = None
     descuento_pct: float | None = None
+    descuento_monto: float | None = None
     # Qué se dedujo del subtotal en vez de leerse del PDF, si algo.
     derivado: str | None = None
     # cantidad x precio (menos descuento) coincide con el subtotal impreso.
@@ -383,6 +415,7 @@ class DocumentoOut(BaseModel):
     motivo: str | None = None
     items: list[ItemSchema] | None = None
     items_observacion: str | None = None
+    descuento_global: float | None = None
     tiene_pdf: bool = False
     pdf_disponible: bool = False
     estado: EstadoDocumento
@@ -415,6 +448,11 @@ class EnviarLote(BaseModel):
     """
 
     ids: list[int]
+
+
+class ConfirmacionReenvio(BaseModel):
+    eliminado_en_finnegans: bool = False
+    finnegans_id: str | None = None
 
 
 class EnvioLoteResult(BaseModel):

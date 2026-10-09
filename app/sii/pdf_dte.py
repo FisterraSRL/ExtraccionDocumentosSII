@@ -33,10 +33,12 @@ from dataclasses import dataclass, field
 
 import pdfplumber
 
+from app.descuentos import DescuentoNoConciliado, analizar_descuentos
+
 # Palabras que marcan el fin de la tabla de ítems y el comienzo de los totales.
 FIN_ITEMS = re.compile(
     r"MONTO\s*(NETO|EXENTO)|TOTAL\$|I\.V\.A\.|IMPUESTO\s*ADICIONAL|"
-    r"Timbre\s*Electr|Verifique\s*documento|Otros\s*cobros",
+    r"Timbre\s*Electr|Verifique\s*documento|Otros\s*cobros|Descuento\s*Global",
     re.IGNORECASE,
 )
 class DTEPdfError(RuntimeError):
@@ -51,6 +53,9 @@ class ItemDTE:
     subtotal: float | None
     codigo: str | None = None
     descuento_pct: float | None = None
+    # Importe validado contra el subtotal y la cabecera; no se inventa a partir de
+    # una mera diferencia entre precio y subtotal.
+    descuento_monto: float | None = None
     # Qué se dedujo en vez de leerse del PDF ("cantidad", "precio" o "cantidad y precio"),
     # para no hacer pasar por dato lo que en realidad es una inferencia.
     derivado: str | None = None
@@ -65,6 +70,7 @@ class ItemDTE:
             "subtotal": self.subtotal,
             "codigo": self.codigo,
             "descuento_pct": self.descuento_pct,
+            "descuento_monto": self.descuento_monto,
             "derivado": self.derivado,
             "cuadra": self.cuadra,
         }
@@ -74,6 +80,7 @@ class ItemDTE:
 class DetalleDTE:
     items: list[ItemDTE] = field(default_factory=list)
     totales: dict[str, float] = field(default_factory=dict)
+    descuentos_globales: list[dict] = field(default_factory=list)
     # False cuando la suma de los ítems no cuadra con los totales del propio documento.
     cuadra: bool = True
     observacion: str | None = None
@@ -97,6 +104,17 @@ def _numero(texto: str) -> float | None:
         return float(limpio)
     except ValueError:
         return None
+
+
+def _porcentaje(texto: str | None) -> float | None:
+    if not texto:
+        return None
+    limpio = texto.strip().replace("%", "").replace(" ", "")
+    if not re.fullmatch(r"\d+(?:[.,]\d+)?", limpio):
+        return None
+    # En la columna %Desc. el punto es decimal ("10.00" = 10 %), mientras que
+    # en los importes monetarios del PDF el punto separa miles.
+    return float(limpio.replace(",", "."))
 
 
 def _agrupar_en_lineas(palabras: list[dict], tolerancia: float = 3.0) -> list[list[dict]]:
@@ -227,7 +245,7 @@ def extraer_detalle(pdf_bytes: bytes) -> DetalleDTE:
         texto_linea = " ".join(w["text"] for w in linea)
 
         if FIN_ITEMS.search(texto_linea):
-            _leer_totales(texto_linea, detalle.totales)
+            _leer_totales(texto_linea, detalle.totales, detalle.descuentos_globales)
             continue
 
         campos = _partir_fila(linea, ref)
@@ -255,7 +273,7 @@ def extraer_detalle(pdf_bytes: bytes) -> DetalleDTE:
                 codigo=codigo,
                 cant=_numero(campos["cantidad"]),
                 precio=_numero(campos["precio"]),
-                descuento=_numero(campos["descuento"]),
+                descuento=_porcentaje(campos["descuento"]),
                 subtotal=valor,
             )
         )
@@ -315,19 +333,28 @@ def _armar_item(
     )
 
 
-def _leer_totales(texto: str, totales: dict[str, float]) -> None:
+def _leer_totales(
+    texto: str, totales: dict[str, float], descuentos_globales: list[dict] | None = None,
+) -> None:
     for etiqueta, clave in (
+        (r"Descuento\s*Global", "descuento_global"),
         (r"MONTO\s*NETO", "neto"),
         (r"MONTO\s*EXENTO", "exento"),
         (r"I\.V\.A\.[^$]*", "iva"),
         (r"IMPUESTO\s*ADICIONAL", "impuesto_adicional"),
         (r"TOTAL", "total"),
     ):
-        m = re.search(etiqueta + r"\$?\s*([\d.,\-]+)", texto, re.IGNORECASE)
-        if m:
+        for m in re.finditer(etiqueta + r"\s*\$?\s*([\d.,\-]+)", texto, re.IGNORECASE):
             valor = _numero(m.group(1))
             if valor is not None:
-                totales.setdefault(clave, valor)
+                if clave == "descuento_global":
+                    if valor == 0:
+                        continue
+                    totales[clave] = totales.get(clave, 0) + valor
+                    if descuentos_globales is not None:
+                        descuentos_globales.append({"importe": valor})
+                else:
+                    totales.setdefault(clave, valor)
 
 
 def _verificar(detalle: DetalleDTE) -> None:
@@ -341,31 +368,23 @@ def _verificar(detalle: DetalleDTE) -> None:
         detalle.observacion = "El PDF no tiene filas de ítems reconocibles."
         return
 
-    descuadrados = [i for i in detalle.items if not i.cuadra]
-    if descuadrados:
-        detalle.cuadra = False
-        cuales = ", ".join(f"{i.desc[:28]!r}" for i in descuadrados[:3])
-        # Causa comprobada mirando varios de estos documentos: el emisor aplicó un
-        # descuento por MONTO, y la representación impresa del SII solo tiene columna
-        # para descuento por PORCENTAJE, así que imprime el precio de lista y el valor
-        # ya rebajado sin mostrar la diferencia. No es un error de lectura ni del
-        # documento; el subtotal es el bueno.
-        detalle.observacion = (
-            f"{len(descuadrados)} de {len(detalle.items)} ítems tienen un precio "
-            f"unitario que no multiplica al subtotal ({cuales}). Suele ser un descuento "
-            "por monto: el PDF del SII muestra el precio de lista y el valor ya "
-            "rebajado, pero no la rebaja. El subtotal es el importe válido."
-        )
-        return
-
-    suma = sum(i.subtotal or 0 for i in detalle.items)
     base = detalle.totales.get("neto", 0) + detalle.totales.get("exento", 0)
     if not base:
         base = detalle.totales.get("total", 0)
-    if base and abs(suma - base) > max(2.0, base * 0.01):
-        detalle.cuadra = False
-        detalle.observacion = (
-            f"La suma de los ítems ({suma:,.0f}) no coincide con el neto+exento del "
-            f"documento ({base:,.0f}). Puede haber descuentos globales u otros cobros "
-            "que el desglose no refleja."
+    try:
+        conciliacion = analizar_descuentos(
+            [item.como_dict() for item in detalle.items], base,
+            detalle.descuentos_globales or detalle.totales.get("descuento_global", 0),
+            "PDF del SII",
         )
+    except DescuentoNoConciliado as exc:
+        detalle.cuadra = False
+        detalle.observacion = str(exc)
+    else:
+        for descuento in conciliacion.descuentos:
+            if descuento.origen == "item" and descuento.indice is not None:
+                item = detalle.items[descuento.indice]
+                item.descuento_monto = float(descuento.importe)
+                item.cuadra = True
+        detalle.cuadra = True
+        detalle.observacion = None
