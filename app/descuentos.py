@@ -221,7 +221,29 @@ def analizar_descuentos(
             subtotales - global_impreso - base - importe_exento_compensado
         ) <= tolerancia)
     )
-    if abs(restante) > tolerancia or (
+    # El precio unitario del PDF puede estar impreso con dos decimales aunque
+    # el subtotal use más precisión interna. Con muchas unidades, la diferencia
+    # acumulada puede superar un peso sin ser un descuento. Solo se admite si
+    # los subtotales corroboran exactamente la base y cada ítem cabe dentro de
+    # medio centavo por unidad (más el redondeo final del subtotal).
+    redondeo_unitario = False
+    if restante < -tolerancia and subtotal_valido and not descuentos and not global_impreso:
+        redondeo_unitario = True
+        for item in items:
+            cantidad = _decimal(item.get("cant"), "la cantidad del ítem")
+            precio = _decimal(item.get("precio"), "el precio del ítem")
+            subtotal = _decimal(
+                item.get("subtotal") if item.get("subtotal") is not None else cantidad * precio,
+                "el subtotal del ítem",
+            )
+            if precio.as_tuple().exponent > -2:
+                redondeo_unitario = False
+                break
+            margen = abs(cantidad) * Decimal("0.5").scaleb(precio.as_tuple().exponent)
+            if abs(cantidad * precio - subtotal) > margen + Decimal("0.5"):
+                redondeo_unitario = False
+                break
+    if (abs(restante) > tolerancia and not redondeo_unitario) or (
         not subtotal_valido
     ):
         raise DescuentoNoConciliado(

@@ -238,6 +238,7 @@
   }
   .pill.pending{background:var(--st-pending-bg); color:var(--st-pending-fg); border-color:var(--st-pending-border);}
   .pill.sent{background:var(--st-sent-bg); color:var(--st-sent-fg); border-color:var(--st-sent-border);}
+  .pill.external{background:#e5edf2; color:var(--fs-navy); border-color:#b8cbd6;}
   .pill.error{background:var(--st-error-bg); color:var(--st-error-fg); border-color:var(--st-error-border);}
   .estado-cell{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
   .link-btn{
@@ -1170,7 +1171,12 @@
       return "<div class=\"estado-cell\"><span class=\"pill pending\"><span class=\"spinner\"></span> Enviando…</span></div>";
     }
     if(doc.estado === "enviado"){
-      return "<div class=\"estado-cell\"><span class=\"pill sent\">Enviado</span><span class=\"muted small\">" + fmtFecha(doc.fecha_envio) + "</span>" +
+      var externo = doc.origen_envio === "externo";
+      return "<div class=\"estado-cell\"><span class=\"pill sent\">Enviado</span>" +
+        (externo ? "<span class=\"pill external\" title=\"Finnegans informó que el comprobante ya existía\">Otro método</span>" : "") +
+        (doc.fecha_envio ? "<span class=\"muted small\">" + fmtFecha(doc.fecha_envio) + "</span>" : "") +
+        (externo && doc.finnegans_id ? "<span class=\"muted small\">" + esc(doc.finnegans_id) + "</span>" : "") +
+        (externo && doc.error_detalle ? "<button class=\"link-btn\" data-action=\"view-error\" data-id=\"" + doc.id + "\" type=\"button\">Ver aviso del ERP</button>" : "") +
         "<button class=\"link-btn\" data-action=\"habilitar-reenvio\" data-id=\"" + doc.id + "\" type=\"button\">Habilitar reenvío</button></div>";
     }
     if(doc.estado === "error"){
@@ -1520,6 +1526,7 @@
         if(res.estado === "enviado") selected.delete(res.id);
       });
       var msg = d.enviados + " enviado" + (d.enviados === 1 ? "" : "s");
+      if(d.ya_existentes) msg += " · " + d.ya_existentes + " ya existente" + (d.ya_existentes === 1 ? "" : "s") + " en el ERP";
       if(d.empresa_finnegans) msg += " a " + d.empresa_finnegans;
       if(d.con_error) msg += " · " + d.con_error + " con error";
       if(d.omitidos) msg += " · " + d.omitidos + " ya estaban enviados";
@@ -1544,6 +1551,8 @@
   function openErrorModal(id){
     var doc = docs.find(function(d){ return d.id === id; });
     if(!doc) return;
+    document.getElementById("modalTitle").textContent = doc.origen_envio === "externo"
+      ? "Comprobante ya existente en Finnegans" : "Error al enviar a Finnegans";
     document.getElementById("modalMeta").innerHTML =
       esc(doc.tipo_nombre || doc.tipo) + " · Folio " + doc.folio + "<br>" + esc(doc.proveedor_nombre) + " · " + esc(doc.proveedor_rut);
     document.getElementById("modalError").textContent = doc.error_detalle || "Error no especificado.";

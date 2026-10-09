@@ -72,6 +72,13 @@ PATRON_IE = re.compile(
     r"\bIE\s*Base\s*:\s*([+-]?[\d.,]+)\s*[-–]?\s*IE\s*Variable\s*:\s*([+-]?[\d.,]+)",
     re.IGNORECASE,
 )
+PATRON_IE_MONTOS = re.compile(
+    r"\bImpto\.?\s*Espec[ií]fico\s+Base\s*:?\s*"
+    r"(?P<base>\(\s*[\d.,]+\s*\)|[+-]?[\d.,]+)\s*[-–.]?\s*"
+    r"Impto\.?\s*Espec[ií]fico\s+Variable\s*:?\s*"
+    r"(?P<variable>\(\s*[\d.,]+\s*\)|[+-]?[\d.,]+)",
+    re.IGNORECASE,
+)
 
 
 def _decimal_ie(texto: str) -> Decimal:
@@ -83,14 +90,37 @@ def _decimal_ie(texto: str) -> Decimal:
         raise FinnegansMapeoError("No se pudieron leer los componentes IE del combustible.") from exc
 
 
+def _monto_ie_impreso(texto: str) -> Decimal:
+    """Lee montos de la glosa del PDF (puntos de miles y paréntesis negativos)."""
+    negativo = texto.strip().startswith("(") or texto.strip().startswith("-")
+    cifras = re.sub(r"[^\d,.]", "", texto)
+    if not cifras or cifras.count(",") > 1:
+        raise FinnegansMapeoError("No se pudo leer el monto de impuesto específico del PDF.")
+    try:
+        monto = Decimal(cifras.replace(".", "").replace(",", "."))
+    except InvalidOperation as exc:
+        raise FinnegansMapeoError("No se pudo leer el monto de impuesto específico del PDF.") from exc
+    return -monto if negativo else monto
+
+
 def _importes_ie(documento: Documento, items: list[dict]) -> list[int]:
     """Calcula el IE conocido por ítem antes de completar otros importes exentos."""
     calculados: list[Decimal] = []
     for item in items:
         descripcion = str(item.get("desc") or "")
+        montos = PATRON_IE_MONTOS.search(descripcion)
+        if montos:
+            calculados.append(
+                _monto_ie_impreso(montos.group("base"))
+                + _monto_ie_impreso(montos.group("variable"))
+            )
+            continue
         coincidencia = PATRON_IE.search(descripcion)
         if not coincidencia:
-            if re.search(r"\bIE\s*(?:Base|Variable)\s*:", descripcion, re.IGNORECASE):
+            if re.search(
+                r"\b(?:IE\s*(?:Base|Variable)\s*:|Impto\.?\s*Espec[ií]fico\s+(?:Base|Variable))",
+                descripcion, re.IGNORECASE,
+            ):
                 raise FinnegansMapeoError(
                     f"Folio {documento.folio}: el detalle menciona IE, pero no se pudieron "
                     "leer sus componentes base y variable. Revisá el PDF antes de enviar."
@@ -121,12 +151,12 @@ def _importes_ie(documento: Documento, items: list[dict]) -> list[int]:
     esperado = sum(calculados).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     importes = [int(valor.to_integral_value(rounding=ROUND_FLOOR)) for valor in calculados]
     faltan = int(esperado) - sum(importes)
-    if not 0 <= faltan <= sum(valor > 0 for valor in calculados):
+    if not 0 <= faltan <= sum(valor != 0 for valor in calculados):
         raise FinnegansMapeoError(
             f"Folio {documento.folio}: no se pudo distribuir el redondeo del IE entre los ítems."
         )
     orden = sorted(
-        (indice for indice, valor in enumerate(calculados) if valor > 0),
+        (indice for indice, valor in enumerate(calculados) if valor != 0),
         key=lambda indice: calculados[indice] - importes[indice], reverse=True,
     )
     for indice in orden[:faltan]:
@@ -316,6 +346,18 @@ def _agregar_lineas_de_ajuste(documento: Documento, payload: dict,
 
     adicional = total - neto - iva - exento
     ie = sum(_importes_ie(documento, documento.items or []))
+    if ie < 0:
+        if adicional != ie:
+            raise FinnegansMapeoError(
+                f"Folio {documento.folio}: el impuesto específico negativo del PDF "
+                f"es ${ie}, pero la diferencia entre el total y neto + IVA + exento "
+                f"es ${adicional}. Revisá el documento antes de enviar."
+            )
+        agregar_linea(
+            Decimal(ie), "Impuesto específico negativo del combustible",
+            es_exento=True,
+        )
+        return
     if adicional < ie or adicional < 0:
         raise FinnegansMapeoError(
             f"Folio {documento.folio}: los impuestos y la base superan el total del SII. "
@@ -357,6 +399,29 @@ SUBTIPO_POR_TIPO_SII = {
     "60": "NCCPRA",    # Nota de Crédito (papel)
     "BHE": "BO",       # Boleta de Honorarios Electrónica
 }
+
+
+PATRON_COMPROBANTE_REPETIDO = re.compile(
+    r"comprobante repetido.*?el n.mero de comprobante\s+(?P<folio>\d+)\s+"
+    r"del cliente/proveedor\s+.+?\s+ya existe en la transacci.n\s+"
+    r"(?P<subtipo>[A-Z0-9]+)\s*-\s*(?P<numero>\d+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def referencia_comprobante_repetido(
+    mensaje: str | None, folio: int, tipo_sii: str,
+) -> str | None:
+    """Reconoce solo el duplicado del mismo folio y subtipo informado por Finnegans."""
+    coincidencia = PATRON_COMPROBANTE_REPETIDO.search(mensaje or "")
+    subtipo_esperado = SUBTIPO_POR_TIPO_SII.get(tipo_sii)
+    if not coincidencia or not subtipo_esperado:
+        return None
+    if int(coincidencia.group("folio")) != folio:
+        return None
+    if coincidencia.group("subtipo").upper() != subtipo_esperado:
+        return None
+    return f"{subtipo_esperado} - {coincidencia.group('numero')}"
 
 
 class FinnegansConfigError(RuntimeError):

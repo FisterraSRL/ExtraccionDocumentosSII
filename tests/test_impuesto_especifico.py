@@ -8,7 +8,10 @@ from unittest.mock import patch
 from fastapi import Response
 
 from app.config import settings
-from app.finnegans.client import FinnegansClient, FinnegansMapeoError, ajuste_importe_exento
+from app.descuentos import DescuentoNoConciliado, analizar_descuentos
+from app.finnegans.client import (
+    FinnegansClient, FinnegansMapeoError, _importes_ie, ajuste_importe_exento,
+)
 from app.models import AsociacionItem, Documento, ProductoFinnegans
 from app.productos import _firma
 from app.routers.documents import _codigos_seleccionados, previsualizar_documento
@@ -72,6 +75,63 @@ def test_payload_conserva_el_exento_del_sii():
     ) + sum(concepto["ConceptoImporte"] for concepto in payload["Conceptos"]) == 42150
     assert ajuste_importe_exento(documento, payload) == 3586
     json.dumps(payload)
+
+
+def test_impuesto_especifico_negativo_impreso_como_montos_concilia_total():
+    documento = _documento(
+        total=2836000, neto=2566123, iva=487563,
+        items=[{
+            "desc": (
+                "Petróleo Diesel Impto.Especifico Base 215.164.- "
+                "Impto.Especifico Variable ( 432.850).-"
+            ),
+            "cant": 2000, "precio": 1283.06, "subtotal": 2566123,
+        }],
+    )
+    assert _importes_ie(documento, documento.items) == [-217686]
+    payload = _payload(documento)
+    assert payload["Productos"][0]["Cantidad"] == 2000
+    assert payload["Productos"][0]["Precio"] == 1283.06
+    assert any(
+        linea["Cantidad"] == -1 and linea["Precio"] == 217686
+        and linea["ImporteExento"] == -217686
+        for linea in payload["Productos"]
+    )
+    assert payload["Conceptos"][1]["ConceptoImporteGravado"] == -217686
+    assert payload["ImporteTotalControl"] == 2836000
+    assert sum(
+        Decimal(str(linea["Cantidad"])) * Decimal(str(linea["Precio"]))
+        for linea in payload["Productos"]
+    ) + sum(Decimal(str(c["ConceptoImporte"])) for c in payload["Conceptos"]) == 2836000
+
+
+def test_impuesto_especifico_negativo_no_oculta_otra_diferencia():
+    documento = _documento(
+        total=2835999, neto=2566123, iva=487563,
+        items=[{
+            "desc": "Diesel Impto.Especifico Base 215.164.- Impto.Especifico Variable (432.850).-",
+            "cant": 2000, "precio": 1283.06, "subtotal": 2566123,
+        }],
+    )
+    try:
+        _payload(documento)
+    except FinnegansMapeoError as exc:
+        assert "impuesto específico negativo" in str(exc)
+        assert "$-217687" in str(exc)
+    else:
+        raise AssertionError("No se debe completar arbitrariamente otra diferencia")
+
+
+def test_redondeo_unitario_no_permite_una_diferencia_mayor():
+    try:
+        analizar_descuentos(
+            [{"desc": "Diesel", "cant": 2000, "precio": 1283.06, "subtotal": 2566135}],
+            2566135,
+        )
+    except DescuentoNoConciliado as exc:
+        assert "diferencia sin justificar" in str(exc)
+    else:
+        raise AssertionError("Un importe fuera del margen de redondeo no puede compensarse")
 
 
 def test_seleccion_de_producto_llega_a_la_vista_previa():
@@ -284,6 +344,9 @@ def test_vista_previa_informa_el_ajuste_sin_alterar_el_json():
 if __name__ == "__main__":
     test_item_del_pdf_conserva_cantidad_y_precio()
     test_payload_conserva_el_exento_del_sii()
+    test_impuesto_especifico_negativo_impreso_como_montos_concilia_total()
+    test_impuesto_especifico_negativo_no_oculta_otra_diferencia()
+    test_redondeo_unitario_no_permite_una_diferencia_mayor()
     test_seleccion_de_producto_llega_a_la_vista_previa()
     test_centro_de_costo_cubre_tambien_las_lineas_de_ajuste()
     test_centro_de_pruebas_tambien_para_producto_que_no_lo_requiere()

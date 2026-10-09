@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
@@ -64,5 +64,42 @@ def init_db() -> None:
 
     try:
         Base.metadata.create_all(bind=engine)
+        columnas_nuevas = (
+            ("documentos", "origen_envio"),
+            ("historial_reenvios", "origen_envio_anterior"),
+        )
+        with engine.begin() as conexion:
+            for tabla, columna in columnas_nuevas:
+                existentes = {dato["name"] for dato in inspect(conexion).get_columns(tabla)}
+                if columna not in existentes:
+                    condicion = " IF NOT EXISTS" if engine.dialect.name == "postgresql" else ""
+                    conexion.execute(text(
+                        f"ALTER TABLE {tabla} ADD COLUMN{condicion} {columna} VARCHAR(20)"
+                    ))
+
+        # Los intentos anteriores quedaron como error, aunque Finnegans confirmó
+        # que el comprobante ya estaba registrado. Se reclasifican una sola vez.
+        from app.finnegans.client import referencia_comprobante_repetido
+        from app.models import Documento, EstadoDocumento
+
+        with SessionLocal() as sesion:
+            errores = sesion.scalars(select(Documento).where(
+                Documento.estado == EstadoDocumento.ERROR,
+                Documento.error_detalle.is_not(None),
+            )).all()
+            corregidos = 0
+            for documento in errores:
+                referencia = referencia_comprobante_repetido(
+                    documento.error_detalle, documento.folio, documento.tipo,
+                )
+                if referencia is None:
+                    continue
+                documento.estado = EstadoDocumento.ENVIADO
+                documento.origen_envio = "externo"
+                documento.finnegans_id = referencia
+                corregidos += 1
+            if corregidos:
+                sesion.commit()
+                log.info("Reclasificados %s comprobantes ya existentes en Finnegans.", corregidos)
     except Exception:
         log.exception("No se pudieron crear las tablas en %s", engine.url.render_as_string())

@@ -65,6 +65,49 @@ def test_habilitacion_visible_sin_envio_automatico():
         navegador.close()
 
 
+def test_comprobante_externo_aparece_marcado_en_enviados():
+    documento = {
+        "id": 1, "empresa_rut": "00000000-0", "tipo": "33",
+        "tipo_nombre": "Factura Electrónica", "folio": 101415,
+        "proveedor_rut": "11111111-1", "proveedor_nombre": "Proveedor de prueba",
+        "fecha": "2025-01-02", "total": 1000, "neto": 840, "iva": 160,
+        "exento": 0, "items": [], "estado": "enviado",
+        "origen_envio": "externo", "fecha_envio": None,
+        "finnegans_id": "FC - 46773", "error_detalle": "Comprobante repetido en Finnegans",
+    }
+
+    def responder(ruta):
+        path = urlparse(ruta.request.url).path
+        if path == "/api/sesion":
+            datos = {"autenticado": True, "configurada": True, "sin_login": True}
+        elif path == "/api/version":
+            datos = {"version": "1.0.4"}
+        elif path == "/api/configuracion/sii":
+            datos = {"nombre_activo": "Certificado de prueba"}
+        elif path == "/api/empresas":
+            datos = [{"rut": "00000000-0", "nombre_mostrado": "Empresa de prueba", "documentos": 1}]
+        elif path == "/api/documents":
+            datos = [documento]
+        else:
+            datos = {}
+        ruta.fulfill(status=200, content_type="application/json", body=json.dumps(datos))
+
+    with sync_playwright() as playwright:
+        navegador = playwright.chromium.launch(headless=True)
+        pagina = navegador.new_page()
+        pagina.route("**/api/**", responder)
+        pagina.goto("http://127.0.0.1:8000/")
+        pagina.get_by_label("Empresa a consultar").select_option("00000000-0")
+        pagina.locator('[data-estado="enviado"]').click()
+        assert pagina.get_by_text("Otro método").is_visible()
+        assert pagina.get_by_text("FC - 46773", exact=True).is_visible()
+        assert pagina.locator('input[data-action="select"]').count() == 0
+        pagina.get_by_role("button", name="Ver aviso del ERP").click()
+        assert pagina.get_by_role("heading", name="Comprobante ya existente en Finnegans").is_visible()
+        navegador.close()
+
+
 if __name__ == "__main__":
     test_habilitacion_visible_sin_envio_automatico()
+    test_comprobante_externo_aparece_marcado_en_enviados()
     print("Pantalla de reenvío: OK")

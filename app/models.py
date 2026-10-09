@@ -212,7 +212,10 @@ class Documento(Base):
         default=EstadoDocumento.PENDIENTE,
     )
     fecha_envio: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    finnegans_id: Mapped[str | None] = mapped_column(String(100), nullable=True)  # id del comprobante ya creado en Finnegans
+    # En duplicados, la referencia es la transacción informada por Finnegans;
+    # no equivale necesariamente al identificador devuelto por un POST exitoso.
+    finnegans_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    origen_envio: Mapped[str | None] = mapped_column(String(20), nullable=True)  # "app" o "externo"
     error_detalle: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     sincronizado_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -245,6 +248,7 @@ class HistorialReenvio(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     documento_id: Mapped[int] = mapped_column(ForeignKey("documentos.id"), nullable=False, index=True)
     finnegans_id_anterior: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    origen_envio_anterior: Mapped[str | None] = mapped_column(String(20), nullable=True)
     fecha_envio_anterior: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     habilitado_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
@@ -440,6 +444,7 @@ class DocumentoOut(BaseModel):
     estado: EstadoDocumento
     fecha_envio: datetime | None = None
     finnegans_id: str | None = None
+    origen_envio: str | None = None
     error_detalle: str | None = None
 
     class Config:
@@ -456,6 +461,7 @@ class EnviarResult(BaseModel):
     id: int
     estado: EstadoDocumento
     finnegans_id: str | None = None
+    origen_envio: str | None = None
     error_detalle: str | None = None
 
 
@@ -478,6 +484,7 @@ class ConfirmacionReenvio(BaseModel):
 class EnvioLoteResult(BaseModel):
     enviados: int
     con_error: int
+    ya_existentes: int = 0
     # Ya estaban enviados: no se reintentan para no duplicar el comprobante en el ERP.
     omitidos: int = 0
     # Un lote puede contener varias empresas, resueltas por RUT en la cuenta activa.

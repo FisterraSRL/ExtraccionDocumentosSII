@@ -398,12 +398,19 @@ URLs, logs o mensajes de error.
 - **`Conceptos` es el desglose impositivo** (IVA y base gravada), **no** las líneas de
   gasto. Leyendo solo la documentación se mapea mal.
 - **Las líneas van en `Productos`**, con un código del maestro.
-- Cuando el PDF de combustible detalla `IE Base` e `IE Variable`, el impuesto
+- Cuando el PDF de combustible detalla tasas `IE Base:` e `IE Variable:`, el impuesto
   específico se calcula como cantidad × (base + variable), se redondea al peso y se
-  envía como **una línea de producto exenta aparte**: `Cantidad: 1`, `Precio` e
-  `ImporteExento` por el mismo importe. El ítem original de combustible conserva
-  cantidad y precio y no lleva ese impuesto en su propio `ImporteExento`.
-  El `exento` informado por el SII no se modifica.
+  envía como una línea de producto exenta aparte. Si la glosa dice
+  `Impto.Especifico Base ... Impto.Especifico Variable ...`, son **montos ya
+  calculados**, con puntos de miles y paréntesis para el valor negativo: se suman
+  sin volver a multiplicar por cantidad. Un IE neto negativo se representa como
+  una línea separada con `Cantidad: -1` e `ImporteExento` negativo, únicamente si
+  coincide exactamente con la diferencia entre el total y neto + IVA + exento.
+  El campo `Impuesto adicional $1` del DTE negativo es una convención del SII, no
+  el impuesto real: https://www.sii.cl/preguntas_frecuentes/factura_electronica/001_003_8044.htm
+  El ítem original conserva cantidad y precio; el `exento` informado por el SII
+  no se modifica. La aceptación de la nueva línea negativa por Finnegans aún no
+  se verificó con un envío real.
 - En `Productos`, **conservar `Cantidad` y `Precio` originales del PDF**. El control
   monetario usa `Cantidad × Precio` **sin redondear** cada línea. En la factura de
   combustible que falló, esa multiplicación difiere del neto SII solo por una
@@ -599,6 +606,16 @@ el botón queda bloqueado, en vez de enterarse a mitad del lote. Se puede marcar
 falló (así se reintenta); lo ya enviado no.
 
 **Nunca automático.** Requisito explícito del dueño del proyecto.
+
+**Comprobante ya existente en Finnegans.** Si un intento devuelve el aviso
+`Comprobante repetido ... El número de comprobante [folio] ... ya existe en la
+transacción [subtipo] - [referencia]`, se valida que folio y subtipo sean los del
+documento. Solo entonces se clasifica como `enviado` con `origen_envio="externo"`,
+se conserva el aviso y la referencia del ERP, y se muestra `Otro método` en la
+solapa Enviados. No se usa la fecha de detección como fecha de carga, que se
+desconoce. Otros errores siguen en Con error. `init_db()` incorpora las columnas y
+reclasifica de forma idempotente los avisos históricos al iniciar. Un POST exitoso
+lleva `origen_envio="app"`. El reenvío conserva el origen anterior en su historial.
 
 **Reenvío de un documento enviado.** La bandeja ofrece "Habilitar reenvío" solo en
 documentos enviados. La persona debe eliminar primero el comprobante en Finnegans y

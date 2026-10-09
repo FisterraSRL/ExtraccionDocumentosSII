@@ -23,6 +23,7 @@ from app.finnegans.client import (
     FinnegansMapeoError,
     FinnegansSendResult,
     ajuste_importe_exento,
+    referencia_comprobante_repetido,
 )
 from app.models import (
     AsociacionItem,
@@ -883,22 +884,39 @@ def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> En
     if resultado.ok:
         documento.estado = EstadoDocumento.ENVIADO
         documento.finnegans_id = resultado.finnegans_id
+        documento.origen_envio = "app"
         documento.error_detalle = None
         documento.fecha_envio = datetime.now(timezone.utc)
         log.info("Documento %s folio %s → Finnegans %s",
                  documento.tipo, documento.folio, resultado.finnegans_id)
     else:
-        documento.estado = EstadoDocumento.ERROR
+        referencia = referencia_comprobante_repetido(
+            resultado.error_detalle, documento.folio, documento.tipo,
+        )
         documento.error_detalle = resultado.error_detalle
-        # También al log, y no solo a la fila: el motivo del rechazo es lo único que
-        # explica qué corregir, y si algo pisa el campo en la base se pierde para siempre.
-        log.warning("Finnegans rechazó el documento %s (%s folio %s): %s",
-                    documento.id, documento.tipo, documento.folio, resultado.error_detalle)
+        if referencia:
+            # El ERP confirmó que ya existe: reintentar el POST duplicaría el
+            # comprobante. Se conserva el aviso y su referencia como evidencia.
+            documento.estado = EstadoDocumento.ENVIADO
+            documento.origen_envio = "externo"
+            documento.finnegans_id = referencia
+            documento.fecha_envio = None  # no conocemos la fecha de carga original
+            log.info("Documento %s folio %s ya existente en Finnegans: %s",
+                     documento.tipo, documento.folio, referencia)
+        else:
+            documento.estado = EstadoDocumento.ERROR
+            documento.origen_envio = None
+            documento.finnegans_id = None
+            # También al log, y no solo a la fila: el motivo del rechazo es lo único
+            # que explica qué corregir si algo pisa el campo en la base.
+            log.warning("Finnegans rechazó el documento %s (%s folio %s): %s",
+                        documento.id, documento.tipo, documento.folio, resultado.error_detalle)
     db.commit()
 
     return EnviarResult(
         id=documento.id, estado=documento.estado,
-        finnegans_id=documento.finnegans_id, error_detalle=documento.error_detalle,
+        finnegans_id=documento.finnegans_id, origen_envio=documento.origen_envio,
+        error_detalle=documento.error_detalle,
     )
 
 
@@ -969,11 +987,13 @@ def habilitar_reenvio(documento_id: int, confirmacion: ConfirmacionReenvio,
     db.add(HistorialReenvio(
         documento_id=documento.id,
         finnegans_id_anterior=documento.finnegans_id,
+        origen_envio_anterior=documento.origen_envio,
         fecha_envio_anterior=documento.fecha_envio,
         habilitado_at=datetime.now(timezone.utc),
     ))
     documento.estado = EstadoDocumento.PENDIENTE
     documento.finnegans_id = None
+    documento.origen_envio = None
     documento.fecha_envio = None
     documento.error_detalle = None
     db.commit()
@@ -1018,12 +1038,18 @@ def enviar_seleccion(lote: EnviarLote, db: Session = Depends(get_db)):
             continue
         resultados.append(_enviar(db, documento, finnegans))
 
-    enviados = sum(1 for r in resultados if r.estado == EstadoDocumento.ENVIADO)
-    log.info("Envío a Finnegans: %s enviados, %s con error, %s ya estaban.",
-             enviados, len(resultados) - enviados, omitidos)
+    enviados = sum(
+        1 for r in resultados if r.estado == EstadoDocumento.ENVIADO
+        and r.origen_envio != "externo"
+    )
+    ya_existentes = sum(1 for r in resultados if r.origen_envio == "externo")
+    con_error = len(resultados) - enviados - ya_existentes
+    log.info("Envío a Finnegans: %s enviados, %s ya existentes, %s con error, %s omitidos.",
+             enviados, ya_existentes, con_error, omitidos)
     return EnvioLoteResult(
         enviados=enviados,
-        con_error=len(resultados) - enviados,
+        ya_existentes=ya_existentes,
+        con_error=con_error,
         omitidos=omitidos,
         empresa_finnegans=None,
         resultados=resultados,
