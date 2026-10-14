@@ -124,6 +124,10 @@ class SIIAuthenticationError(RuntimeError):
     """El navegador terminó el flujo de login pero la sesión no quedó iniciada."""
 
 
+class SIIConnectionError(RuntimeError):
+    """Falló la conexión del proxy local que Playwright usa con el certificado."""
+
+
 class SIICertificateError(SIIAuthenticationError):
     """El .pfx no se pudo leer con la contraseña dada, o el archivo no es un certificado válido."""
 
@@ -303,6 +307,31 @@ class SIIClient:
                 "límite de frecuencia del SII."
             )
 
+    @staticmethod
+    def _navegar_con_certificado(page, url: str, **kwargs) -> None:
+        """Reintenta solo una navegación que falló antes de contactar al SII.
+
+        Playwright canaliza los contextos con certificado por un proxy SOCKS local.
+        Un fallo de ese socket no significa que el SII haya rechazado la sesión y
+        nunca debe provocar por sí solo otro login con certificado.
+        """
+        try:
+            page.goto(url, **kwargs)
+        except Exception as exc:
+            if "net::ERR_SOCKS_CONNECTION_FAILED" not in str(exc):
+                raise
+            log.warning("Falló el proxy local de certificados; se reintenta la navegación una vez.")
+            page.wait_for_timeout(1000)
+            try:
+                page.goto(url, **kwargs)
+            except Exception as segundo:
+                if "net::ERR_SOCKS_CONNECTION_FAILED" in str(segundo):
+                    raise SIIConnectionError(
+                        "El navegador no pudo conectar con el proxy local del certificado digital. "
+                        "No se intentó otro login con el certificado."
+                    ) from segundo
+                raise
+
     def _sesion_viva(self, page) -> bool:
         """¿Las cookies guardadas siguen sirviendo para lo que vamos a hacer?
 
@@ -318,9 +347,13 @@ class SIIClient:
         apareciera mucho después, disfrazado de problema de timing.
         """
         try:
-            page.goto(SII_MISII_HOME, wait_until="domcontentloaded", timeout=30000)
+            self._navegar_con_certificado(
+                page, SII_MISII_HOME, wait_until="domcontentloaded", timeout=30000
+            )
             page.wait_for_timeout(800)
             texto = page.inner_text("body")
+        except SIIConnectionError:
+            raise
         except Exception:
             return False
         rut_plano = self.rut.replace(".", "").replace("-", "")
@@ -332,11 +365,15 @@ class SIIClient:
             return False
 
         try:
-            page.goto(RCV_UI + "#/index", wait_until="networkidle", timeout=45000)
+            self._navegar_con_certificado(
+                page, RCV_UI + "#/index", wait_until="networkidle", timeout=45000
+            )
             page.wait_for_selector(
                 "select[name=rut] option[value]:not([value=''])", state="attached", timeout=20000
             )
             return True
+        except SIIConnectionError:
+            raise
         except Exception:
             log.info("La sesión guardada ya no sirve para el RCV: se vuelve a autenticar.")
             return False
@@ -367,8 +404,16 @@ class SIIClient:
                 page = context.new_page()
                 page.on("dialog", lambda dialogo: dialogo.accept())
                 if self._sesion_viva(page):
+                    # El SII puede renovar cookies al validar la sesión. La copia en
+                    # disco debe seguir al navegador, no quedarse en el login original.
+                    self._guardar_cookies(context)
                     return page, context, browser, playwright
                 context.close()
+            except SIIConnectionError:
+                context.close()
+                browser.close()
+                playwright.stop()
+                raise
             except Exception:
                 pass
             browser.close()
@@ -392,11 +437,30 @@ class SIIClient:
         return session
 
     def _guardar_cookies(self, context) -> None:
+        temporal = None
         try:
             DIR_ESTADO.mkdir(parents=True, exist_ok=True)
-            context.storage_state(path=str(self.archivo_cookies))
+            descriptor, temporal = tempfile.mkstemp(
+                prefix=f".sii-sesion-{self.perfil}-", suffix=".json", dir=DIR_ESTADO
+            )
+            os.close(descriptor)
+            context.storage_state(path=temporal)
+            os.replace(temporal, self.archivo_cookies)
         except Exception:
-            pass
+            log.warning("No se pudieron conservar las cookies de la sesión SII.")
+        finally:
+            if temporal:
+                Path(temporal).unlink(missing_ok=True)
+
+    def cerrar_sesion(self, session) -> None:
+        """Conserva las cookies renovadas antes de cerrar el navegador del SII."""
+        _, context, browser, playwright = session
+        try:
+            self._guardar_cookies(context)
+        finally:
+            context.close()
+            browser.close()
+            playwright.stop()
 
     def login_with_browser(self, headless: bool = True, timeout: float = 45000):
         """Loguea al SII con un Chromium real (Playwright) usando el certificado digital.
@@ -444,9 +508,21 @@ class SIIClient:
         )
         page = context.new_page()
         page.on("dialog", lambda dialogo: dialogo.accept())
+        fallos_red: list[str] = []
+
+        def registrar_fallo(request) -> None:
+            # Solo se retiene el código de Chromium: la URL podría contener datos
+            # de autenticación del SII y no debe terminar en errores o logs.
+            codigo = re.search(r"net::ERR_[A-Z_]+", str(request.failure or ""))
+            if codigo:
+                fallos_red.append(codigo.group(0))
+
+        page.on("requestfailed", registrar_fallo)
 
         try:
-            page.goto(SII_MISII_HOME, wait_until="domcontentloaded", timeout=timeout)
+            self._navegar_con_certificado(
+                page, SII_MISII_HOME, wait_until="domcontentloaded", timeout=timeout
+            )
             page.click("text=Ingresar con Certificado Digital", timeout=timeout / 2)
             page.wait_for_load_state("networkidle", timeout=timeout)
 
@@ -458,6 +534,12 @@ class SIIClient:
                 continuar.first.click()
                 page.wait_for_load_state("networkidle", timeout=timeout)
 
+            if page.url.startswith("chrome-error://"):
+                detalle = f" ({fallos_red[-1]})" if fallos_red else ""
+                raise SIIConnectionError(
+                    "El navegador interrumpió la conexión durante el inicio de sesión "
+                    f"con el certificado digital{detalle}. No se pudo confirmar una sesión SII."
+                )
             texto = page.inner_text("body")
             if "certificate expired" in texto.lower():
                 raise SIIAuthenticationError(
@@ -531,9 +613,7 @@ class SIIClient:
             return empresas
         finally:
             if propia:
-                context.close()
-                browser.close()
-                playwright.stop()
+                self.cerrar_sesion(session)
 
     def _entrar_portal_fe(self, page, rut_empresa: str) -> None:
         """Selecciona la empresa en el Portal de Facturación (requisito de ese módulo)."""
@@ -630,9 +710,7 @@ class SIIClient:
             return salida
         finally:
             if propia:
-                context.close()
-                browser.close()
-                playwright.stop()
+                self.cerrar_sesion(session)
 
     def get_pdf_documento(self, codigo: str, session) -> bytes:
         """Baja la representación impresa (PDF) de un documento recibido.
@@ -688,9 +766,7 @@ class SIIClient:
             return [r.strip() for r in ruts]
         finally:
             if propia:
-                context.close()
-                browser.close()
-                playwright.stop()
+                self.cerrar_sesion(session)
 
     def get_nombre_empresa(self, page) -> str | None:
         """Razón social de la empresa consultada, leída del detalle de un documento.
@@ -898,9 +974,7 @@ class SIIClient:
         finally:
             page.remove_listener("response", al_responder)
             if propia:
-                context.close()
-                browser.close()
-                playwright.stop()
+                self.cerrar_sesion(session)
 
     def get_bhe(self, periodo: str) -> list[dict]:
         """Trae las boletas de honorarios electrónicas recibidas en un período (YYYY-MM).

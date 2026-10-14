@@ -220,6 +220,19 @@ misiir.sii.cl/cgi_misii/siihome.cgi
 El certificado **no** necesita estar en el almacén del sistema operativo: se lee del
 `.pfx` en disco. El login es portable (Linux, contenedor, nube).
 
+Playwright enruta los contextos con `client_certificates` por un proxy SOCKS **local**.
+`ERR_SOCKS_CONNECTION_FAILED` al abrir Mi SII indica que ese proxy falló antes de
+consultar el portal: no demuestra un rechazo del certificado ni cookies vencidas.
+Se reintenta solo esa navegación una vez; si vuelve a fallar, se informa el error y
+no se fuerza un nuevo login. Al cerrar cada sesión, incluso una reutilizada, se
+guarda su estado de cookies antes de cerrar Chromium para no reutilizar una copia vieja.
+El 14-oct-2026, una sincronización controlada siguió fallando durante la redirección
+del login: Chromium terminó en `chrome-error://chromewebdata/` sin sesión SII. Las
+pruebas de navegación pública externa también fueron inestables sin certificado; el
+proxy sí respondió contra un servidor local. La causa de la falla externa sigue
+sin aislarse y **no está confirmado que la sincronización esté reparada**. No repetir
+autenticaciones para diagnosticarla sin respetar el freno de frecuencia del SII.
+
 ---
 
 ## 6. ⚠️ El SII limita la frecuencia de logins

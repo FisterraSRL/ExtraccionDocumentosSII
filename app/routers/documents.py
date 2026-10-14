@@ -222,11 +222,11 @@ def refrescar_empresas(db: Session = Depends(get_db)):
             ruts = client.get_empresas(session=session)
             nombradas = client.get_empresas_con_nombre(session=session)
         finally:
-            session[1].close()
-            session[2].close()
-            session[3].stop()
+            client.cerrar_sesion(session)
     except sii.SIIBloqueadoError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except sii.SIIConnectionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except sii.SIIAuthenticationError as exc:
         raise HTTPException(
             status_code=502, detail=f"No se pudo iniciar sesión en el SII: {exc}"
@@ -348,9 +348,7 @@ def _traer_pdf_del_sii(db: Session, documento: Documento) -> bytes:
             client._entrar_portal_fe(page, documento.empresa_rut)
             contenido = client.get_pdf_documento(documento.pdf_codigo, session)
         finally:
-            context.close()
-            browser.close()
-            playwright.stop()
+            client.cerrar_sesion(session)
     except sii.SIIBloqueadoError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except HTTPException:
@@ -438,12 +436,13 @@ def sincronizar(
                 # cuatro anteriores ya quedaron guardadas en vez de perderse.
                 db.commit()
         finally:
-            context.close()
-            browser.close()
-            playwright.stop()
+            client.cerrar_sesion(session)
     except sii.SIIBloqueadoError as exc:
         db.rollback()
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except sii.SIIConnectionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except sii.SIIAuthenticationError as exc:
         db.rollback()
         raise HTTPException(status_code=502, detail=f"No se pudo iniciar sesión en el SII: {exc}") from exc

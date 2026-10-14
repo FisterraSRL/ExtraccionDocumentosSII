@@ -32,6 +32,11 @@ class _SIIPrueba:
     def abrir_sesion(self, **kwargs):
         return None, _Cerrar(), _Cerrar(), _Cerrar()
 
+    def cerrar_sesion(self, session):
+        session[1].close()
+        session[2].close()
+        session[3].stop()
+
     def get_empresas(self, **kwargs):
         return self.ruts
 
