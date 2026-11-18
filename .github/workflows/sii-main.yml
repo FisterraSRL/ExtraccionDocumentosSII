@@ -20,10 +20,33 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install test dependencies
-        run: |
-          python -m pip install -r requirements-sync.txt pytest httpx
-          python -m playwright install --with-deps chromium
+        run: python -m pip install -r requirements-sync.txt pytest httpx
+      - name: Install Chromium for Playwright
+        run: python -m playwright install chromium
       - name: Test the exact commit
+        shell: bash
         env:
           DATABASE_URL: sqlite:///${{ runner.temp }}/sii-ci.db
-        run: python -m pytest -q tests
+        run: |
+          DATABASE_URL="sqlite:///$RUNNER_TEMP/sii-ui.db" PORTAL_SIN_LOGIN=1 \
+            python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+
+          ready=false
+          for attempt in {1..30}; do
+            if curl --fail --silent --max-time 1 http://127.0.0.1:8000/health >/dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != true ]]; then
+            echo "The loopback test server failed to become healthy." >&2
+            exit 1
+          fi
+
+          python -m pytest -q tests
