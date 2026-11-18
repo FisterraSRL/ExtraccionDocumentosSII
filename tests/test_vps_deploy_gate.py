@@ -1,4 +1,8 @@
 import importlib.util
+import io
+import os
+import stat
+import tarfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -57,3 +61,32 @@ def test_workflow_query_is_pinned_to_production_repo_and_commit(monkeypatch):
 
     monkeypatch.setattr(deploy, "read_json", api)
     assert not deploy.tests_passed(COMMIT)
+
+
+def test_archive_context_is_readable_with_private_service_umask(monkeypatch, tmp_path):
+    def git_archive(command, *, stdout, check, timeout):
+        with tarfile.open(fileobj=stdout, mode="w") as archive:
+            app = tarfile.TarInfo("app")
+            app.type = tarfile.DIRTYPE
+            app.mode = 0o755
+            archive.addfile(app)
+            contents = b"value = 1\n"
+            module = tarfile.TarInfo("app/routers/documents.py")
+            module.size = len(contents)
+            module.mode = 0o644
+            archive.addfile(module, io.BytesIO(contents))
+
+    monkeypatch.setattr(deploy.subprocess, "run", git_archive)
+    scratch = tmp_path / "private"
+    scratch.mkdir(mode=0o700)
+    old_umask = os.umask(0o077)
+    try:
+        context = deploy.archive_source(tmp_path / "repo", COMMIT, scratch)
+    finally:
+        os.umask(old_umask)
+
+    assert (context / "app/routers/documents.py").read_bytes() == b"value = 1\n"
+    if os.name == "posix":
+        assert stat.S_IMODE(scratch.stat().st_mode) == 0o700
+        for directory in (context, context / "app", context / "app/routers"):
+            assert stat.S_IMODE(directory.stat().st_mode) == 0o755

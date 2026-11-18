@@ -157,6 +157,10 @@ def archive_source(cache, sha, directory):
             if path.suffix.lower() in {".pfx", ".p12", ".pem", ".key", ".db", ".sqlite", ".sqlite3"}:
                 raise ValueError("Restricted file in the release archive")
         source.extractall(context, filter="data")
+    # The tar data filter ignores directory modes. With a private service umask,
+    # Docker would copy root-only directories that the application user cannot read.
+    for directory, _, _ in os.walk(context):
+        Path(directory).chmod(0o755)
     return context
 
 
