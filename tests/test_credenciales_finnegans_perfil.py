@@ -114,11 +114,18 @@ def test_empresa_destino_de_pruebas_es_igual_en_vista_previa_y_envio():
     with patch("app.finnegans.client.settings", configuracion):
         payload = cliente.construir_payload(documento)
         resultado = cliente.send_document(documento)
+        codigos = {"empresa_codigo": "OTRA_EMPRESA", "workflow_codigo": "OTRO_FLUJO"}
+        vista_editada = cliente.construir_payload(documento, **codigos)
+        envio_editado = cliente.send_document(documento, **codigos)
     assert payload["EmpresaCodigo"] == "PRUEBA39"
     assert resultado.ok
-    assert len(enviados) == 1
+    assert len(enviados) == 2
     assert enviados[0][0:2] == ("POST", "facturaCompra")
     assert enviados[0][2]["EmpresaCodigo"] == "PRUEBA39"
+    assert envio_editado.ok
+    assert vista_editada["EmpresaCodigo"] == "OTRA_EMPRESA"
+    assert vista_editada["WorkflowCodigo"] == "OTRO_FLUJO"
+    assert enviados[1] == ("POST", "facturaCompra", vista_editada)
     assert consultas == []
 
 

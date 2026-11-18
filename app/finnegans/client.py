@@ -56,8 +56,7 @@ from app.models import Documento
 
 log = logging.getLogger(__name__)
 
-# Destino temporal de pruebas indicado por el usuario. La vista previa y el envío
-# comparten construir_payload(), por lo que ambos muestran y usan el mismo código.
+# Destino inicial de la bandeja y de los clientes que omiten el código de empresa.
 EMPRESA_CODIGO_PRUEBA = "PRUEBA39"
 CENTRO_COSTO_PRUEBA = "5"
 BIEN_USO_PRUEBA = "EPRUEB-001"
@@ -654,7 +653,8 @@ class FinnegansClient:
                          codigos_por_indice: dict[int, str] | None = None,
                          centros_por_indice: dict[int, list[dict]] | None = None,
                          descuento_global: float | list[dict] | None = None,
-                         productos_con_centro_requerido: set[str] | None = None) -> dict:
+                         productos_con_centro_requerido: set[str] | None = None,
+                         workflow_codigo: str | None = None) -> dict:
         """Traduce un Documento nuestro al OperacionVO de `POST /facturaCompra`.
 
         La forma está calcada de un documento real de la instancia, que corrigió varias
@@ -686,12 +686,17 @@ class FinnegansClient:
                 f"No hay subtipo de transacción definido para el tipo de documento "
                 f"{documento.tipo} ({documento.tipo_nombre}). Ver SUBTIPO_POR_TIPO_SII."
             )
-        faltan = [
-            nombre for nombre, valor in (
-                ("FINNEGANS_WORKFLOW", settings.finnegans_workflow),
-                ("FINNEGANS_PRODUCTO", settings.finnegans_producto),
-            ) if not valor
-        ]
+        faltan = []
+        if workflow_codigo is None:
+            workflow_codigo = settings.finnegans_workflow
+        if not workflow_codigo:
+            faltan.append("FINNEGANS_WORKFLOW")
+        if not settings.finnegans_producto:
+            asignados = codigos_por_indice or {}
+            if not documento.items or any(
+                not asignados.get(indice) for indice in range(len(documento.items))
+            ):
+                faltan.append("FINNEGANS_PRODUCTO")
         if faltan:
             raise FinnegansConfigError(
                 "Faltan parámetros de imputación en .env: " + ", ".join(faltan) +
@@ -716,7 +721,7 @@ class FinnegansClient:
             "CondicionPagoCodigo": settings.finnegans_condicion_pago,
             "TransaccionTipoCodigo": "OPER",
             "TransaccionSubtipoCodigo": subtipo,
-            "WorkflowCodigo": settings.finnegans_workflow,
+            "WorkflowCodigo": workflow_codigo,
             "NumeroComprobante": str(documento.folio),
             "MonedaCodigo": settings.finnegans_moneda,
             # Campos de AFIP: en Chile no se completan (confirmado con un documento real).
@@ -751,8 +756,7 @@ class FinnegansClient:
             payload["CHL_FolioRef"] = str(documento.folio_doc_ref)
             payload["CHL_FechaRef"] = fecha
         _agregar_lineas_de_ajuste(documento, payload, descuento_global)
-        # Mientras todos los comprobantes van a PRUEBA39, cada línea se imputa al
-        # centro de costo 5. Se hace al final para incluir descuentos, IE y ajustes.
+        # La distribución vigente aplica también a descuentos, IE y ajustes.
         centro_prueba = _dimension_centro_costo([
             {"codigo": CENTRO_COSTO_PRUEBA, "porcentaje": 100},
         ])[0]
@@ -866,7 +870,9 @@ class FinnegansClient:
                       codigos_por_indice: dict[int, str] | None = None,
                       centros_por_indice: dict[int, list[dict]] | None = None,
                       descuento_global: float | list[dict] | None = None,
-                      productos_con_centro_requerido: set[str] | None = None) -> FinnegansSendResult:
+                      productos_con_centro_requerido: set[str] | None = None,
+                      empresa_codigo: str | None = None,
+                      workflow_codigo: str | None = None) -> FinnegansSendResult:
         """Registra el documento en Finnegans como factura de compra.
 
         **Escribe en el ERP productivo.** Antes de llamarlo conviene revisar el resultado
@@ -878,6 +884,7 @@ class FinnegansClient:
                 centros_por_indice=centros_por_indice,
                 descuento_global=descuento_global,
                 productos_con_centro_requerido=productos_con_centro_requerido,
+                empresa_codigo=empresa_codigo, workflow_codigo=workflow_codigo,
             )
         except (FinnegansMapeoError, FinnegansConfigError) as exc:
             return FinnegansSendResult(ok=False, finnegans_id=None, error_detalle=str(exc))

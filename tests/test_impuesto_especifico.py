@@ -5,12 +5,13 @@ from decimal import Decimal
 import json
 from unittest.mock import patch
 
+import pytest
 from fastapi import Response
 
 from app.config import settings
 from app.descuentos import DescuentoNoConciliado, analizar_descuentos
 from app.finnegans.client import (
-    FinnegansClient, FinnegansMapeoError, _importes_ie, ajuste_importe_exento,
+    FinnegansClient, FinnegansConfigError, FinnegansMapeoError, _importes_ie, ajuste_importe_exento,
 )
 from app.models import AsociacionItem, Documento, ProductoFinnegans
 from app.productos import _firma
@@ -75,6 +76,29 @@ def test_payload_conserva_el_exento_del_sii():
     ) + sum(concepto["ConceptoImporte"] for concepto in payload["Conceptos"]) == 42150
     assert ajuste_importe_exento(documento, payload) == 3586
     json.dumps(payload)
+
+
+def test_producto_asignado_habilita_el_payload_sin_generico():
+    configuracion = replace(settings, finnegans_workflow="FLUJO_PRUEBA", finnegans_producto=None)
+    cliente = object.__new__(FinnegansClient)
+    cliente.requiere_bien_uso = lambda codigo: False
+    with patch("app.finnegans.client.settings", configuracion):
+        payload = cliente.construir_payload(_documento(), codigos_por_indice={0: "COMBUSTIBLE"})
+    assert {linea["ProductoCodigo"] for linea in payload["Productos"]} == {"COMBUSTIBLE"}
+
+
+@pytest.mark.parametrize("sin_detalle,asignados,flujo,falta", [
+    (True, {0: "COMBUSTIBLE"}, "FLUJO_PRUEBA", "FINNEGANS_PRODUCTO"),
+    (False, {1: "COMBUSTIBLE"}, "FLUJO_PRUEBA", "FINNEGANS_PRODUCTO"),
+    (False, {0: "COMBUSTIBLE"}, None, "FINNEGANS_WORKFLOW"),
+])
+def test_exige_parametros_si_la_factura_los_necesita(sin_detalle, asignados, flujo, falta):
+    configuracion = replace(settings, finnegans_workflow=flujo, finnegans_producto=None)
+    documento = _documento(items=[] if sin_detalle else None)
+    cliente = object.__new__(FinnegansClient)
+    with patch("app.finnegans.client.settings", configuracion):
+        with pytest.raises(FinnegansConfigError, match=falta):
+            cliente.construir_payload(documento, codigos_por_indice=asignados)
 
 
 def test_impuesto_especifico_negativo_impreso_como_montos_concilia_total():

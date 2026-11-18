@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.auth import requiere_sesion
 from app.db import get_db
 from app.finnegans.client import (
+    EMPRESA_CODIGO_PRUEBA,
     FinnegansClient,
     FinnegansAPIError,
     FinnegansConfigError,
@@ -26,6 +27,7 @@ from app.finnegans.client import (
     referencia_comprobante_repetido,
 )
 from app.models import (
+    CodigoEnvio,
     AsociacionItem,
     DistribucionCentroCosto,
     DescuentoGlobalDocumento,
@@ -862,7 +864,8 @@ def _descuento_global(db: Session, documento: Documento) -> float | list[dict] |
         return registro.importe if registro is not None else None
 
 
-def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> EnviarResult:
+def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient,
+            empresa_codigo: str | None = None, workflow_codigo: str | None = None) -> EnviarResult:
     """Manda un documento y deja escrito en la base cómo le fue.
 
     Cada documento se confirma por separado: si el quinto de una selección falla, los
@@ -876,6 +879,7 @@ def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> En
         resultado = finnegans.send_document(
             documento, codigos_por_indice=codigos,
             descuento_global=descuento,
+            empresa_codigo=empresa_codigo, workflow_codigo=workflow_codigo,
         )
     except (FinnegansMapeoError, FinnegansAPIError) as exc:
         resultado = FinnegansSendResult(ok=False, finnegans_id=None, error_detalle=str(exc))
@@ -919,9 +923,15 @@ def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient) -> En
     )
 
 
+@router.get("/finnegans/parametros-envio")
+def parametros_envio():
+    return {"empresa_codigo": EMPRESA_CODIGO_PRUEBA, "workflow_codigo": settings.finnegans_workflow or ""}
+
+
 @router.get("/documents/{documento_id}/finnegans")
 def previsualizar_documento(documento_id: int, response: Response,
-                            db: Session = Depends(get_db)):
+                            db: Session = Depends(get_db), empresa_codigo: CodigoEnvio | None = None,
+                            workflow_codigo: CodigoEnvio | None = None):
     """El JSON exacto que se le mandaría a Finnegans, sin mandarlo.
 
     Sirve para revisar el mapeo antes de escribir en el ERP, que es una operación que no
@@ -937,6 +947,7 @@ def previsualizar_documento(documento_id: int, response: Response,
         payload = finnegans.construir_payload(
             documento, codigos_por_indice=codigos,
             descuento_global=descuento,
+            empresa_codigo=empresa_codigo, workflow_codigo=workflow_codigo,
         )
         # El JSON depende de reglas y configuración que pueden cambiar sin que cambie
         # el id del documento. Una copia HTTP anterior no sirve para decidir un envío.
@@ -954,14 +965,15 @@ def previsualizar_documento(documento_id: int, response: Response,
 
 
 @router.post("/documents/{documento_id}/send", response_model=EnviarResult)
-def enviar_documento(documento_id: int, db: Session = Depends(get_db)):
+def enviar_documento(documento_id: int, db: Session = Depends(get_db),
+                     empresa_codigo: CodigoEnvio | None = None, workflow_codigo: CodigoEnvio | None = None):
     documento = db.get(Documento, documento_id)
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
     if documento.estado == EstadoDocumento.ENVIADO:
         raise HTTPException(status_code=400, detail="Este documento ya fue enviado.")
 
-    return _enviar(db, documento, _cliente_finnegans())
+    return _enviar(db, documento, _cliente_finnegans(), empresa_codigo, workflow_codigo)
 
 
 @router.post("/documents/{documento_id}/habilitar-reenvio", response_model=DocumentoOut)
@@ -1035,7 +1047,7 @@ def enviar_seleccion(lote: EnviarLote, db: Session = Depends(get_db)):
         if documento.estado == EstadoDocumento.ENVIADO:
             omitidos += 1
             continue
-        resultados.append(_enviar(db, documento, finnegans))
+        resultados.append(_enviar(db, documento, finnegans, lote.empresa_codigo, lote.workflow_codigo))
 
     enviados = sum(
         1 for r in resultados if r.estado == EstadoDocumento.ENVIADO

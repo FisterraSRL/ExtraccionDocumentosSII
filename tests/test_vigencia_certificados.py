@@ -1,4 +1,7 @@
 """El vencimiento se detecta localmente, antes de abrir Playwright o cambiar de perfil."""
+import os
+from base64 import b64encode
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -80,6 +83,39 @@ def test_certificado_vigente_puede_seleccionarse():
         ), patch.object(configuracion_sii, "_activar", return_value={"activo": "vigente"}) as activar:
             assert configuracion_sii.seleccionar("vigente")["activo"] == "vigente"
             activar.assert_called_once()
+
+
+def test_configuracion_persistente_sobrevive_a_otro_proceso_sin_escribir_env():
+    inicial = replace(configuracion_sii.settings, sii_rut="99999999-9", sii_cert_path="obsolete.pfx",
+                      sii_cert_password="obsolete", sii_perfil="obsolete")
+    certificado_primero = b64encode(_pfx(vencido=False)).decode()
+    certificado_segundo = b64encode(_pfx(vencido=False)).decode()
+
+    with TemporaryDirectory() as temporal, patch.dict(os.environ, {"SII_PERFILES_PERSISTENTES": "1"}):
+        directorio = Path(temporal)
+        with patch.multiple(configuracion_sii, DIRECTORIO_SECRETOS=directorio,
+                            ARCHIVO_CERTIFICADO=directorio / "certificado.pfx",
+                            ARCHIVO_PERFILES=directorio / "sii_certificados.json",
+                            settings=replace(inicial)), patch.object(configuracion_sii, "_escribir_env") as escribir_env:
+            configuracion_sii.restaurar_perfil_persistente()
+            assert configuracion_sii.settings.sii_perfil is None
+            assert configuracion_sii.estado()["perfiles"] == []
+            configuracion_sii.guardar("Primero", "00000000-0", "clave-prueba", certificado_primero,
+                                       "client-fixture", "secret-fixture")
+            configuracion_sii.guardar("Segundo", "11111111-1", "clave-prueba", certificado_segundo)
+            assert configuracion_sii.estado()["activo"] == "segundo"
+            configuracion_sii.seleccionar("primero")
+
+            with patch.object(configuracion_sii, "settings", replace(inicial)):
+                configuracion_sii.restaurar_perfil_persistente()
+                assert configuracion_sii.settings.sii_perfil == "primero"
+                assert configuracion_sii.settings.require_sii_credentials() == (
+                    "00000000-0", directorio / "certificado-primero.pfx", "clave-prueba",
+                )
+                assert configuracion_sii.credenciales_finnegans_activas() == (
+                    "primero", "client-fixture", "secret-fixture",
+                )
+            escribir_env.assert_not_called()
 
 
 if __name__ == "__main__":

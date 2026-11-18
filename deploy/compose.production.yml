@@ -1,0 +1,63 @@
+name: sii
+
+services:
+  proxy:
+    image: caddy:2.11.9-alpine
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - type: bind
+        source: ./Caddyfile.sii
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: local
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file:
+      - path: ./.env.portal
+        format: raw
+    environment:
+      DATABASE_URL: sqlite:////data/sii_finnegans.db
+      PORTAL_ADMIN_ORIGIN: https://sii.fisterragroup.com
+      PORTAL_SIN_LOGIN: "0"
+      PORTAL_COOKIE_INSEGURA: "0"
+      SII_PERFILES_PERSISTENTES: "1"
+    init: true
+    restart: unless-stopped
+    shm_size: 256m
+    volumes:
+      - type: bind
+        source: ./data
+        target: /data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./secrets
+        target: /app/secrets
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: local
+
+volumes:
+  caddy_data:
+  caddy_config:

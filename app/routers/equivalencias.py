@@ -1,4 +1,4 @@
-"""Administración local del maestro de equivalencias."""
+"""Administración del maestro de equivalencias."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -6,13 +6,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app import equivalencias
-from app.auth import requiere_sesion
+from app.auth import requiere_sesion_gestion
 from app.db import get_db
-from app.routers.productos import _perfil_local
+from app.routers.productos import _perfil_gestion
 
 
 router = APIRouter(prefix="/api/equivalencias", tags=["equivalencias"],
-                   dependencies=[Depends(requiere_sesion)])
+                   dependencies=[Depends(requiere_sesion_gestion)])
 
 
 class Decision(BaseModel):
@@ -31,7 +31,7 @@ class Lote(BaseModel):
 
 @router.get("")
 def listar(response: Response, q: str = "", estado: str = "todos", pagina: int = 1, limite: int = 50,
-           perfil_id: str = Depends(_perfil_local),
+           perfil_id: str = Depends(_perfil_gestion),
            db: Session = Depends(get_db)):
     try:
         equivalencias.incorporar_historicos(db)
@@ -45,7 +45,7 @@ def listar(response: Response, q: str = "", estado: str = "todos", pagina: int =
 
 @router.post("/lote")
 def guardar_lote(lote: Lote, response: Response,
-                 perfil_id: str = Depends(_perfil_local), db: Session = Depends(get_db)):
+                 perfil_id: str = Depends(_perfil_gestion), db: Session = Depends(get_db)):
     if lote.perfil_esperado != perfil_id:
         raise HTTPException(status_code=409, detail="Cambió el certificado activo. Revisá las selecciones antes de guardar.")
     try:
@@ -61,7 +61,7 @@ def guardar_lote(lote: Lote, response: Response,
 
 @router.put("/{producto_sii_id}")
 def guardar(producto_sii_id: int, decision: Decision, response: Response,
-            perfil_id: str = Depends(_perfil_local), db: Session = Depends(get_db)):
+            perfil_id: str = Depends(_perfil_gestion), db: Session = Depends(get_db)):
     try:
         equivalencias.guardar(db, perfil_id, producto_sii_id, decision.codigo, decision.estado)
         response.headers["Cache-Control"] = "no-store"

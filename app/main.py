@@ -48,6 +48,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @app.on_event("startup")
 def on_startup() -> None:
+    configuracion_sii.restaurar_perfil_persistente()
     init_db()
 
 
@@ -123,23 +124,14 @@ def health():
     return {"status": "ok"}
 
 
-def _solo_local(request: Request) -> None:
-    if not configuracion_sii.es_entorno_local(request):
-        raise HTTPException(status_code=404, detail="No disponible.")
-
-
-@app.get("/api/configuracion/sii")
-def estado_configuracion_sii(
-    request: Request, response: Response, _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local)
-):
+@app.get("/api/configuracion/sii", dependencies=[Depends(auth.requiere_sesion_gestion)])
+def estado_configuracion_sii(response: Response):
     response.headers["Cache-Control"] = "no-store"
     return configuracion_sii.estado()
 
 
-@app.post("/api/configuracion/sii")
-def guardar_configuracion_sii(
-    datos: ConfiguracionSII, request: Request, response: Response, _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local)
-):
+@app.post("/api/configuracion/sii", dependencies=[Depends(auth.requiere_sesion_gestion)])
+def guardar_configuracion_sii(datos: ConfiguracionSII, response: Response):
     try:
         response.headers["Cache-Control"] = "no-store"
         return configuracion_sii.guardar(datos.nombre, datos.rut, datos.password, datos.certificado_b64,
@@ -150,10 +142,8 @@ def guardar_configuracion_sii(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/api/configuracion/sii/seleccionar")
-def seleccionar_configuracion_sii(
-    datos: SeleccionCertificado, request: Request, response: Response, _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local)
-):
+@app.post("/api/configuracion/sii/seleccionar", dependencies=[Depends(auth.requiere_sesion_gestion)])
+def seleccionar_configuracion_sii(datos: SeleccionCertificado, response: Response):
     try:
         response.headers["Cache-Control"] = "no-store"
         return configuracion_sii.seleccionar(datos.perfil)
@@ -161,10 +151,8 @@ def seleccionar_configuracion_sii(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.get("/api/configuracion/sii/{perfil}")
-def detalle_configuracion_sii(
-    perfil: str, request: Request, response: Response, _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local)
-):
+@app.get("/api/configuracion/sii/{perfil}", dependencies=[Depends(auth.requiere_sesion_gestion)])
+def detalle_configuracion_sii(perfil: str, response: Response):
     try:
         response.headers["Cache-Control"] = "no-store"
         return configuracion_sii.detalle(perfil)
@@ -172,11 +160,8 @@ def detalle_configuracion_sii(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.post("/api/configuracion/sii/{perfil}/revelar")
-def revelar_configuracion_sii(
-    perfil: str, datos: SolicitudRevelar, request: Request, response: Response,
-    _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local)
-):
+@app.post("/api/configuracion/sii/{perfil}/revelar", dependencies=[Depends(auth.requiere_sesion_gestion)])
+def revelar_configuracion_sii(perfil: str, datos: SolicitudRevelar, response: Response):
     try:
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
@@ -185,10 +170,9 @@ def revelar_configuracion_sii(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.patch("/api/configuracion/sii/{perfil}")
+@app.patch("/api/configuracion/sii/{perfil}", dependencies=[Depends(auth.requiere_sesion_gestion)])
 def editar_configuracion_sii(
-    perfil: str, datos: EdicionConfiguracionSII, request: Request, response: Response,
-    _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local),
+    perfil: str, datos: EdicionConfiguracionSII, response: Response,
     db: Session = Depends(get_db),
 ):
     try:
@@ -207,14 +191,13 @@ def editar_configuracion_sii(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.get("/configuracion", include_in_schema=False)
-def configuracion(request: Request, _: str = Depends(auth.requiere_sesion), __: None = Depends(_solo_local)) -> FileResponse:
+@app.get("/configuracion", include_in_schema=False, dependencies=[Depends(auth.requiere_sesion_gestion)])
+def configuracion() -> FileResponse:
     return FileResponse(STATIC_DIR / "configuracion.html", headers={"Cache-Control": "no-store"})
 
 
-@app.get("/equivalencias", include_in_schema=False)
-def pagina_equivalencias(request: Request, _: str = Depends(auth.requiere_sesion),
-                         __: None = Depends(_solo_local)) -> FileResponse:
+@app.get("/equivalencias", include_in_schema=False, dependencies=[Depends(auth.requiere_sesion_gestion)])
+def pagina_equivalencias() -> FileResponse:
     return FileResponse(STATIC_DIR / "equivalencias.html", headers={"Cache-Control": "no-store"})
 
 

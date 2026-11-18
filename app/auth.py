@@ -25,6 +25,8 @@ from urllib.parse import urlsplit
 
 from fastapi import Cookie, HTTPException, Request, Response
 
+from app.configuracion_sii import es_entorno_local
+
 COOKIE = "portal_sesion"
 DURACION_SEGUNDOS = 12 * 60 * 60  # una jornada de trabajo
 
@@ -152,14 +154,43 @@ def requiere_sesion(
     request: Request, portal_sesion: str | None = Cookie(default=None)
 ) -> str:
     """Dependencia de FastAPI: corta el pedido si no hay sesión iniciada."""
+    _validar_origen(request)
+    usuario = sesion_valida(portal_sesion) or sesion_automatica(request)
+    if not usuario:
+        raise HTTPException(status_code=401, detail="Hay que iniciar sesión.")
+    return usuario
+
+
+def _validar_origen(request: Request, origen_publicado: str | None = None) -> None:
     # El modo local sin login y el CORS de desarrollo no deben permitir que una
     # página ajena lea credenciales o dispare un envío mediante el navegador.
     origen = request.headers.get("origin")
-    if origen and urlsplit(origen).netloc != request.headers.get("host"):
+    host = request.headers.get("host")
+    if origen_publicado:
+        host_publicado = urlsplit(origen_publicado).netloc
+        origen_invalido = (
+            not host_publicado or origen_publicado != f"https://{host_publicado}"
+            or host != host_publicado or (origen is not None and origen != origen_publicado)
+        )
+    else:
+        origen_invalido = origen and urlsplit(origen).netloc != host
+    if origen_invalido or request.headers.get("sec-fetch-site") == "cross-site":
         raise HTTPException(status_code=403, detail="El origen de la solicitud no está permitido.")
-    if request.headers.get("sec-fetch-site") == "cross-site":
-        raise HTTPException(status_code=403, detail="El origen de la solicitud no está permitido.")
-    usuario = sesion_valida(portal_sesion) or sesion_automatica(request)
+
+
+def requiere_sesion_gestion(
+    request: Request, portal_sesion: str | None = Cookie(default=None)
+) -> str:
+    """Permite la gestión remota solo en el origen HTTPS publicado y con cookie firmada."""
+    origen_publicado = os.getenv("PORTAL_ADMIN_ORIGIN")
+    if not origen_publicado:
+        usuario = requiere_sesion(request, portal_sesion)
+        if not es_entorno_local(request):
+            raise HTTPException(status_code=404, detail="No disponible.")
+        return usuario
+
+    _validar_origen(request, origen_publicado)
+    usuario = sesion_valida(portal_sesion)
     if not usuario:
         raise HTTPException(status_code=401, detail="Hay que iniciar sesión.")
     return usuario

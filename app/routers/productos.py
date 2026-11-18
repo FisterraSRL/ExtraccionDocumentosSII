@@ -5,26 +5,22 @@ from datetime import datetime
 from decimal import Decimal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import configuracion_sii, productos
-from app.auth import requiere_sesion
+from app.auth import requiere_sesion_gestion
 from app.db import get_db
 from app.finnegans.catalogo import ErrorCatalogoFinnegans
 from app.finnegans.client import FinnegansAPIError, FinnegansClient, FinnegansConfigError
 from app.models import DistribucionCentroCosto, Documento
 
 
-router = APIRouter(
-    prefix="/api", tags=["productos"], dependencies=[Depends(requiere_sesion)]
-)
+router = APIRouter(prefix="/api", tags=["productos"], dependencies=[Depends(requiere_sesion_gestion)])
 
 
-def _perfil_local(request: Request) -> str:
-    if not configuracion_sii.es_entorno_local(request):
-        raise HTTPException(status_code=404, detail="No disponible.")
+def _perfil_gestion() -> str:
     try:
         return configuracion_sii.perfil_activo_id()
     except configuracion_sii.ConfiguracionSIIError as exc:
@@ -46,7 +42,7 @@ class DistribucionEntrada(BaseModel):
 
 @router.get("/documents/{documento_id}/centros-costo")
 def consultar_centros_costo(
-    documento_id: int, response: Response, perfil_id: str = Depends(_perfil_local),
+    documento_id: int, response: Response, perfil_id: str = Depends(_perfil_gestion),
     db: Session = Depends(get_db),
 ):
     documento = db.get(Documento, documento_id)
@@ -64,7 +60,7 @@ def consultar_centros_costo(
 @router.put("/documents/{documento_id}/items/{indice}/centros-costo")
 def guardar_centros_costo(
     documento_id: int, indice: int, datos: DistribucionEntrada, response: Response,
-    perfil_id: str = Depends(_perfil_local), db: Session = Depends(get_db),
+    perfil_id: str = Depends(_perfil_gestion), db: Session = Depends(get_db),
 ):
     documento = db.get(Documento, documento_id)
     if documento is None:
@@ -120,7 +116,7 @@ def guardar_centros_costo(
 
 @router.get("/productos/estado")
 def estado_productos(
-    response: Response, perfil_id: str = Depends(_perfil_local), db: Session = Depends(get_db)
+    response: Response, perfil_id: str = Depends(_perfil_gestion), db: Session = Depends(get_db)
 ):
     response.headers["Cache-Control"] = "no-store"
     return productos.estado_catalogo(db, perfil_id)
@@ -128,7 +124,7 @@ def estado_productos(
 
 @router.post("/productos/sincronizar")
 def sincronizar_productos(
-    request: Request, response: Response, perfil_id: str = Depends(_perfil_local),
+    response: Response, perfil_id: str = Depends(_perfil_gestion),
     db: Session = Depends(get_db),
 ):
     try:
@@ -148,7 +144,7 @@ def sincronizar_productos(
 
 @router.get("/productos")
 def buscar_productos(
-    q: str = "", limite: int = 8, perfil_id: str = Depends(_perfil_local),
+    q: str = "", limite: int = 8, perfil_id: str = Depends(_perfil_gestion),
     db: Session = Depends(get_db),
 ):
     return {"productos": productos.buscar(db, perfil_id, q, limite)}
@@ -156,7 +152,7 @@ def buscar_productos(
 
 @router.post("/documents/{documento_id}/productos/preparar")
 def preparar_productos(
-    documento_id: int, response: Response, perfil_id: str = Depends(_perfil_local),
+    documento_id: int, response: Response, perfil_id: str = Depends(_perfil_gestion),
     db: Session = Depends(get_db),
 ):
     documento = db.get(Documento, documento_id)
@@ -173,7 +169,7 @@ def preparar_productos(
 @router.put("/documents/{documento_id}/items/{indice}/producto")
 def elegir_producto(
     documento_id: int, indice: int, datos: SeleccionProducto, response: Response,
-    perfil_id: str = Depends(_perfil_local), db: Session = Depends(get_db),
+    perfil_id: str = Depends(_perfil_gestion), db: Session = Depends(get_db),
 ):
     documento = db.get(Documento, documento_id)
     if documento is None:

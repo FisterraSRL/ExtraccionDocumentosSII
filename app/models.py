@@ -10,7 +10,8 @@ from __future__ import annotations
 import enum
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from typing import Annotated
+from pydantic import BaseModel, StringConstraints
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -465,6 +466,9 @@ class EnviarResult(BaseModel):
     error_detalle: str | None = None
 
 
+CodigoEnvio = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
 class EnviarLote(BaseModel):
     """Los documentos que el usuario marcó en la bandeja.
 
@@ -474,6 +478,8 @@ class EnviarLote(BaseModel):
 
     ids: list[int]
     perfil_esperado: str | None = None
+    empresa_codigo: CodigoEnvio | None = None
+    workflow_codigo: CodigoEnvio | None = None
 
 
 class ConfirmacionReenvio(BaseModel):

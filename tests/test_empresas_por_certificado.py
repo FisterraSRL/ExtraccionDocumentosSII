@@ -87,12 +87,12 @@ def test_la_lista_y_sincronizacion_se_aislan_por_certificado():
         ):
             editar_configuracion_sii(
                 "perfil-a", EdicionConfiguracionSII(nombre="Nuevo nombre", rut="00000000-0"),
-                None, Response(), "", None, db,
+                Response(), db,
             )
             assert db.get(EmpresasPerfilEstado, "perfil-a") is not None
             editar_configuracion_sii(
                 "perfil-a", EdicionConfiguracionSII(nombre="Nuevo nombre", rut="11111111-1"),
-                None, Response(), "", None, db,
+                Response(), db,
             )
             assert db.get(EmpresasPerfilEstado, "perfil-a") is None
 

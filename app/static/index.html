@@ -54,17 +54,27 @@
     color:var(--fs-ink);
     font-family:var(--fs-font);
     padding-inline:20px;
-    padding-block:26px 64px;
+    padding-block:12px;
     min-height:100vh;
   }
-  .wrap{max-width:1180px; margin-inline:auto; display:flex; flex-direction:column; gap:22px;}
+  .wrap{max-width:1180px; margin-inline:auto; display:flex; flex-direction:column; gap:12px;}
+  .cabecera-bandeja{display:grid; gap:10px; min-width:0;}
+  .listado,.panel{display:flex; flex-direction:column; min-height:0; min-width:0;}
+  .listado{height:100vh; height:100dvh;}
+  .panel{flex:1;}
+  .wrap.listado-ampliado{position:fixed; inset:0; z-index:2; max-width:none; background:var(--fs-gradient-surface);}
+  .listado-ampliado .cabecera-bandeja{display:none;}
+  .barra-listado{display:flex;align-items:flex-end;justify-content:space-between;gap:8px;flex:none;}
+  .barra-listado .tabs{min-width:0;overflow-x:auto;flex:0 1 auto;}
+  .ampliar-listado{flex:none;align-self:center;font:600 .78rem var(--fs-font);color:var(--fs-navy);border:1px solid rgba(10,47,67,.24);background:rgba(255,255,255,.55);border-radius:8px;padding:5px 9px;cursor:pointer;}
+  .ampliar-listado:focus-visible{outline:2px solid var(--fs-navy);}
 
   /* ---------- Header ---------- */
   .header-row{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;}
   .section-pill{
     background:var(--fs-gradient-navy); color:var(--fs-white); font-weight:500; font-size:.78rem;
     text-transform:uppercase; letter-spacing:.08em; padding:.55em 1.5em .55em 1.8em; border-radius:var(--fs-radius-pill);
-    margin-left:-20px;
+    margin-left:0;
   }
   .lockup{height:30px; width:auto; flex:none;}
 
@@ -129,13 +139,16 @@
   .paso-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
     border-radius:50%;background:#0A2F43;color:#fff;font-size:.74rem;font-weight:700;flex:none;}
   .empresa-bar #syncBtn:disabled{opacity:.45;cursor:not-allowed;}
-  .empresa-bar{display:flex;align-items:center;gap:12px 26px;flex-wrap:wrap;margin:0 0 18px;
+  .empresa-bar{display:flex;align-items:center;gap:8px 26px;flex-wrap:wrap;
     padding:14px 16px;background:var(--surface,#fff);border:1px solid rgba(10,47,67,.10);
     border-radius:14px;}
   .empresa-bar label{font-weight:700;color:#0A2F43;font-size:.82rem;letter-spacing:.04em;
     text-transform:uppercase;}
   .empresa-bar select{min-width:min(340px,100%);padding:8px 10px;border-radius:9px;
     border:1px solid rgba(10,47,67,.22);font:inherit;color:#0A2F43;background:#fff;}
+  .parametros-envio{flex-basis:100%;display:flex;gap:10px 24px;flex-wrap:wrap;}
+  .parametros-envio label{display:flex;align-items:center;gap:8px;}
+  .parametros-envio input{width:12em;max-width:100%;padding:7px 10px;border:1px solid rgba(10,47,67,.22);border-radius:9px;font:inherit;font-weight:500;color:var(--fs-ink);}
   .empresa-meta{color:#5b6b75;font-size:.84rem;}
   .empresa-aviso{flex-basis:100%; margin-top:2px; padding:9px 12px; border-radius:9px;
     font-size:.82rem; background:#eef4f8; border:1px solid #c5d8e4; color:#28536b;}
@@ -162,9 +175,9 @@
 
   .panel{
     background:var(--fs-surface-high); border:var(--fs-hairline); border-radius:0 var(--fs-radius-panel) var(--fs-radius-panel) var(--fs-radius-panel);
-    box-shadow:var(--fs-shadow-panel); overflow:hidden;
+    box-shadow:var(--fs-shadow-panel); overflow:clip;
   }
-  .panel-inner{padding:18px 18px 4px;}
+  .panel-inner{padding:12px 16px 0;max-height:42%;overflow:auto;flex:none;}
 
   .filters{display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding-bottom:16px;}
   .search-field{position:relative; flex:1 1 220px; min-width:180px;}
@@ -189,7 +202,8 @@
   /* ---------- Bulk bar ---------- */
   .envio-pie{
     display:flex; align-items:center; justify-content:flex-end; gap:16px; flex-wrap:wrap;
-    margin-top:18px; padding:16px 18px; border-top:1px solid rgba(10,47,67,.10);
+    position:sticky;bottom:0;z-index:2;background:var(--fs-surface-high);
+    flex:none; padding:10px 16px; border-top:1px solid rgba(10,47,67,.10);
   }
   .envio-resumen{color:var(--fs-steel-deep); font-size:.86rem;}
   .envio-pie .btn:disabled{opacity:.45; cursor:not-allowed;}
@@ -202,7 +216,8 @@
   .bulk-actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
 
   /* ---------- Table ---------- */
-  .table-wrap{overflow-x:auto; border-radius:var(--fs-radius-media); background:rgba(255,255,255,.5);}
+  .table-wrap{flex:1; min-height:0; overflow:auto; border-radius:var(--fs-radius-media); background:rgba(255,255,255,.5);}
+  .table-wrap > table > thead th{position:sticky;top:0;background:var(--fs-surface-high);z-index:1;}
   table{width:100%; border-collapse:collapse; min-width:760px;}
   thead th{
     text-align:left; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--fs-steel-deep);
@@ -375,6 +390,16 @@
   .empty-state{padding:36px 20px; text-align:center; color:var(--fs-steel-deep); font-size:.9rem; font-weight:500;}
 
   @media (max-width:640px){
+    body{padding:8px;}
+    .wrap{gap:8px;}
+    .empresa-paso{min-width:0;}
+    .empresa-bar select{min-width:0;max-width:100%;}
+    .parametros-envio{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
+    .parametros-envio label{display:grid;}
+    .parametros-envio input{width:100%;min-width:0;}
+    .envio-pie{gap:5px 10px;padding:8px;}
+    .tabs{overflow-x:auto;flex:none;}
+    .tab-btn{white-space:nowrap;padding:.65em .9em;}
     .empresa-bar{flex-direction:column; align-items:stretch;}
     .kpis{grid-template-columns:repeat(2,1fr);}
     .header-row{flex-direction:column;}
@@ -383,6 +408,7 @@
     .sync-block .btn{width:100%; justify-content:center;}
     .titular{font-size:1.9rem;}
   }
+  @media (max-height:550px){.wrap{gap:5px;}.envio-pie{padding-block:5px;}}
 </style>
 </head>
 <body>
@@ -404,6 +430,7 @@
 </div>
 
 <div class="wrap">
+  <div class="cabecera-bandeja">
   <div class="header-row">
     <span class="section-pill">Documentos SII</span>
     <span class="app-version" id="appVersion" title="Versión del portal"></span>
@@ -451,6 +478,10 @@
           <span class="empresa-meta" id="empresaMeta"></span>
         </div>
         <div class="empresa-aviso" id="empresaAviso" hidden></div>
+        <div class="parametros-envio">
+          <label for="empresaDestino">Empresa Destino <input id="empresaDestino" type="text" required autocomplete="off" spellcheck="false"></label>
+          <label for="workflowCodigo">Workflow <input id="workflowCodigo" type="text" required autocomplete="off" spellcheck="false"></label>
+        </div>
       </div>
   <div class="kpis">
     <div class="kpi pending">
@@ -475,12 +506,16 @@
     </div>
   </div>
 
-  <div>
+  </div>
+  <div class="listado" id="listado">
+    <div class="barra-listado">
     <div class="tabs" id="estadoTabs">
       <button class="tab-btn active" data-estado="todos" type="button">Todos</button>
       <button class="tab-btn" data-estado="pendiente" type="button">Pendientes</button>
       <button class="tab-btn" data-estado="enviado" type="button">Enviados</button>
       <button class="tab-btn" data-estado="error" type="button">Con error</button>
+    </div>
+    <button class="ampliar-listado" id="ampliarListado" type="button" aria-controls="listado" aria-pressed="false">Ampliar listado</button>
     </div>
 
     <div class="panel">
@@ -498,7 +533,7 @@
         <div class="bulk-bar" id="bulkBar" hidden></div>
       </div>
 
-      <div class="table-wrap">
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Listado de documentos">
         <table>
           <thead>
             <tr>
@@ -651,6 +686,9 @@
   var reenvioDocumentoId = null;
   var habilitandoReenvio = false;
   var perfilConfirmado = null;
+  var destinoConfirmado = null;
+  var empresaDestino = document.getElementById("empresaDestino");
+  var workflowCodigo = document.getElementById("workflowCodigo");
   var consultaConfirmacion = null;
 
   var tbody = document.getElementById("tbody");
@@ -719,7 +757,7 @@
       mostrarEstadoCertificados(r.data);
       cargarPerfilActivo();
       asociacionesCache.clear();
-      perfilConfirmado = null;
+      restablecerDestino();
       cargarEstadoProductos();
       empresaActual = "";
       try { localStorage.removeItem("empresaActual"); } catch(err){}
@@ -820,6 +858,7 @@
     return comprobarSesion().then(function(hay){
       if(!hay){ mostrarLogin(true); return; }
       mostrarLogin(false);
+      cargarParametrosEnvio();
       loadVersion();
       cargarPerfilActivo();
       return loadEmpresas().then(restaurarBandeja);
@@ -1363,10 +1402,42 @@
 
   // ---------- Envío a Finnegans ----------
 
+  function cargarParametrosEnvio(){
+    return apiFetch("/api/finnegans/parametros-envio", {cache:"no-store"}).then(function(r){
+      if(!r.ok) throw new Error();
+      var conservarEmpresa = empresaDestino.value !== empresaDestino.defaultValue;
+      var conservarWorkflow = workflowCodigo.value !== workflowCodigo.defaultValue;
+      empresaDestino.defaultValue = r.data.empresa_codigo || "";
+      workflowCodigo.defaultValue = r.data.workflow_codigo || "";
+      if(!conservarEmpresa) empresaDestino.value = empresaDestino.defaultValue;
+      if(!conservarWorkflow) workflowCodigo.value = workflowCodigo.defaultValue;
+    }).catch(function(){ showToast("Completá empresa destino y workflow para enviar.", true); });
+  }
+
+  function restablecerDestino(){
+    empresaDestino.value = empresaDestino.defaultValue;
+    workflowCodigo.value = workflowCodigo.defaultValue;
+    cerrarConfirmacion();
+  }
+
+  function destinoEnvio(){
+    return {empresa_codigo:empresaDestino.value.trim(), workflow_codigo:workflowCodigo.value.trim()};
+  }
+  function urlVistaPrevia(id, destino){
+    return "/api/documents/" + id + "/finnegans?" + new URLSearchParams(destino).toString();
+  }
+
   function abrirConfirmacion(){
     var elegidos = seleccionEnviable();
     if(!elegidos.length){
       showToast("Marcá al menos un documento para enviar.", true);
+      return;
+    }
+    var destino = destinoEnvio();
+    if(!destino.empresa_codigo || !destino.workflow_codigo){
+      mostrarListadoAmpliado(false);
+      (!destino.empresa_codigo ? empresaDestino : workflowCodigo).focus();
+      showToast("Completá Empresa Destino y Workflow antes de enviar.", true);
       return;
     }
     var suma = elegidos.reduce(function(s, d){ return s + d.total; }, 0);
@@ -1384,6 +1455,7 @@
     aviso.textContent = "Preparando la vista previa con Finnegans… La primera consulta puede tardar hasta un minuto.";
     json.textContent = "Cargando…";
     perfilConfirmado = null;
+    destinoConfirmado = null;
     ok.disabled = true;
     document.getElementById("confirmJsonBox").open = false;
     document.getElementById("confirmOverlay").hidden = false;
@@ -1401,7 +1473,7 @@
     // Se arma el JSON del primero antes de habilitar el envío: si falta un parámetro de
     // imputación o el proveedor no existe en Finnegans, se ve acá y no después de haber
     // escrito medio lote en el ERP.
-    apiFetch("/api/documents/" + elegidos[0].id + "/finnegans",
+    apiFetch(urlVistaPrevia(elegidos[0].id, destino),
              {cache:"no-store", signal:controlador.signal}).then(function(r){
       if(controlador !== consultaConfirmacion) return;
       if(!r.ok){
@@ -1413,6 +1485,11 @@
         aviso.textContent = "No se pudo verificar el certificado de Finnegans. Volvé a abrir la vista previa.";
         return;
       }
+      if(r.data.EmpresaCodigo !== destino.empresa_codigo || r.data.WorkflowCodigo !== destino.workflow_codigo){
+        aviso.textContent = "El destino de la vista previa difiere del solicitado. Volvé a revisar los códigos.";
+        return;
+      }
+      destinoConfirmado = destino;
       perfilConfirmado = r.perfilFinnegans;
       json.textContent = JSON.stringify(r.data, null, 2);
       aviso.innerHTML =
@@ -1442,6 +1519,8 @@
 
   function cerrarConfirmacion(){
     if(consultaConfirmacion){ consultaConfirmacion.abort(); consultaConfirmacion = null; }
+    destinoConfirmado = null;
+    perfilConfirmado = null;
     document.getElementById("confirmOverlay").hidden = true;
   }
 
@@ -1499,7 +1578,10 @@
   function enviarSeleccion(){
     var elegidos = seleccionEnviable();
     if(!elegidos.length) return;
-    if(!perfilConfirmado){
+    var destino = destinoEnvio();
+    if(!perfilConfirmado || !destinoConfirmado || destino.empresa_codigo !== destinoConfirmado.empresa_codigo ||
+       destino.workflow_codigo !== destinoConfirmado.workflow_codigo){
+      cerrarConfirmacion();
       showToast("Volvé a revisar la vista previa antes de enviar.", true);
       return;
     }
@@ -1512,7 +1594,8 @@
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        ids: elegidos.map(function(d){ return d.id; }), perfil_esperado: perfilEnvio
+        ids: elegidos.map(function(d){ return d.id; }), perfil_esperado: perfilEnvio,
+        empresa_codigo: destino.empresa_codigo, workflow_codigo: destino.workflow_codigo
       })
     }).then(function(r){
       if(!r.ok){
@@ -1577,7 +1660,7 @@
 
     var pre = document.getElementById("errorJson");
     pre.textContent = "Cargando…";
-    apiFetch("/api/documents/" + id + "/finnegans", {cache:"no-store"}).then(function(r){
+    apiFetch(urlVistaPrevia(id, destinoEnvio()), {cache:"no-store"}).then(function(r){
       // Pueden haber cerrado el modal y abierto otro documento mientras cargaba.
       if(errorJsonId !== id) return;
       pre.textContent = r.ok
@@ -1728,6 +1811,16 @@
     renderTable();
   });
 
+  var ampliarListado = document.getElementById("ampliarListado");
+  function mostrarListadoAmpliado(ampliado){
+    document.querySelector(".wrap").classList.toggle("listado-ampliado", ampliado);
+    ampliarListado.setAttribute("aria-pressed", String(ampliado));
+    ampliarListado.textContent = ampliado ? "Restaurar vista" : "Ampliar listado";
+  }
+  ampliarListado.addEventListener("click", function(){
+    mostrarListadoAmpliado(ampliarListado.getAttribute("aria-pressed") !== "true");
+  });
+
   document.getElementById("syncBtn").addEventListener("click", handleSync);
   document.getElementById("searchInput").addEventListener("input", function(e){
     filters.q = e.target.value; renderTable();
@@ -1750,6 +1843,7 @@
       if(r.ok){
         document.getElementById("loginPassword").value = "";
         mostrarLogin(false);
+        cargarParametrosEnvio();
         loadVersion();
         return loadEmpresas().then(restaurarBandeja);
       }
@@ -1816,7 +1910,7 @@
       mostrarEstadoCertificados(r.data);
       cargarPerfilActivo();
       document.getElementById("certificadoForm").reset();
-      perfilConfirmado = null;
+      restablecerDestino();
       empresaActual = "";
       try { localStorage.removeItem("empresaActual"); } catch(err){}
       empresas = [];
@@ -1831,9 +1925,17 @@
   });
 
   document.getElementById("empresaSelect").addEventListener("change", function(e){
+    restablecerDestino();
     empresaActual = e.target.value;
     try { localStorage.setItem("empresaActual", empresaActual); } catch(err){}
     restaurarBandeja();
+  });
+
+  [empresaDestino, workflowCodigo].forEach(function(campo){
+    campo.addEventListener("input", function(){
+      cerrarConfirmacion();
+      errorJsonId = null;
+    });
   });
 
   document.getElementById("renombrarBtn").addEventListener("click", function(){
@@ -1887,10 +1989,15 @@
   });
   document.addEventListener("keydown", function(e){
     if(e.key !== "Escape") return;
-    if(!document.getElementById("certificadosOverlay").hidden) cerrarCertificados();
-    if(!document.getElementById("confirmOverlay").hidden) cerrarConfirmacion();
-    if(!document.getElementById("reenvioOverlay").hidden) cerrarReenvio();
-    if(!document.getElementById("modalOverlay").hidden) closeErrorModal();
+    if(!document.getElementById("loginOverlay").hidden) return;
+    if(!document.getElementById("certificadosOverlay").hidden) return cerrarCertificados();
+    if(!document.getElementById("confirmOverlay").hidden) return cerrarConfirmacion();
+    if(!document.getElementById("reenvioOverlay").hidden) return cerrarReenvio();
+    if(!document.getElementById("modalOverlay").hidden) return closeErrorModal();
+    if(ampliarListado.getAttribute("aria-pressed") === "true"){
+      mostrarListadoAmpliado(false);
+      ampliarListado.focus();
+    }
   });
 
   renderAll();

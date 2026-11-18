@@ -1,0 +1,12 @@
+**
+!app/
+!app/**
+!requirements.txt
+!requirements-sync.txt
+
+**/__pycache__/
+**/.env*
+**/secrets/
+**/*.pfx
+**/*.p12
+**/*.db*

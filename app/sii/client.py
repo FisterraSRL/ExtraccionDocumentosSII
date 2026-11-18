@@ -378,6 +378,18 @@ class SIIClient:
             log.info("La sesión guardada ya no sirve para el RCV: se vuelve a autenticar.")
             return False
 
+    @staticmethod
+    def _abrir_navegador(headless: bool):
+        from playwright.sync_api import sync_playwright  # import diferido: dependencia pesada
+
+        playwright = sync_playwright().start()
+        try:
+            browser = playwright.chromium.launch(headless=headless)
+        except Exception:
+            playwright.stop()
+            raise
+        return browser, playwright
+
     def abrir_sesion(self, headless: bool = True, forzar_login: bool = False):
         """Devuelve una sesión autenticada, **reusando** la anterior si sigue viva.
 
@@ -394,11 +406,8 @@ class SIIClient:
 
         Devuelve la misma tupla que `login_with_browser()`.
         """
-        from playwright.sync_api import sync_playwright  # import diferido: dependencia pesada
-
         if not forzar_login and self.archivo_cookies.is_file():
-            playwright = sync_playwright().start()
-            browser = playwright.chromium.launch(headless=headless)
+            browser, playwright = self._abrir_navegador(headless)
             try:
                 context = browser.new_context(storage_state=str(self.archivo_cookies))
                 page = context.new_page()
@@ -490,13 +499,10 @@ class SIIClient:
         lanza SIIAuthenticationError si no lo logró — nunca devuelve una página sin
         autenticar haciéndola pasar por buena.
         """
-        from playwright.sync_api import sync_playwright  # import diferido: dependencia pesada
-
         if not self._cert_pem_file:
             self._load_pkcs12()
 
-        playwright = sync_playwright().start()
-        browser = playwright.chromium.launch(headless=headless)
+        browser, playwright = self._abrir_navegador(headless)
         context = browser.new_context(
             client_certificates=[
                 {

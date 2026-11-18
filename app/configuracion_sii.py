@@ -1,4 +1,4 @@
-"""Configuracion local del certificado con el que Playwright se autentica ante el SII."""
+"""Configuración de los certificados con los que Playwright se autentica ante el SII."""
 from __future__ import annotations
 
 import base64
@@ -46,6 +46,10 @@ def es_entorno_local(request) -> bool:
     )
 
 
+def _perfiles_persistentes() -> bool:
+    return os.getenv("SII_PERFILES_PERSISTENTES") == "1"
+
+
 def _leer_perfiles() -> dict:
     try:
         datos = json.loads(ARCHIVO_PERFILES.read_text(encoding="utf-8"))
@@ -53,6 +57,8 @@ def _leer_perfiles() -> dict:
             return datos
     except Exception:
         pass
+    if _perfiles_persistentes():
+        return {"activo": None, "perfiles": {}}
     # Migra la configuración existente como primer perfil sin tocar el certificado.
     if settings.sii_rut and settings.sii_cert_path and settings.sii_cert_password:
         ruta = Path(settings.sii_cert_path)
@@ -164,7 +170,7 @@ def detalle(identificador: str) -> dict:
 
 
 def revelar(identificador: str, campo: str) -> str:
-    """Entrega un solo dato sensible tras una solicitud explícita desde la pantalla local."""
+    """Entrega un solo dato sensible tras una solicitud explícita de Configuración."""
     claves = {
         "password": "password",
         "client_id": "client_id",
@@ -226,18 +232,41 @@ def _activar(identificador: str, datos: dict) -> dict:
     ruta = _archivo_perfil(perfil)
     if not ruta.is_file():
         raise ConfiguracionSIIError("No se encontró el archivo del certificado seleccionado.")
-    ruta_env = f"secrets/{ruta.name}"
-    _escribir_env({"SII_RUT": perfil["rut"], "SII_CERT_PATH": ruta_env,
-                   "SII_CERT_PASSWORD": perfil["password"], "SII_PERFIL": identificador})
+    persistentes = _perfiles_persistentes()
+    valores = _valores_perfil(identificador, perfil, str(ruta) if persistentes else f"secrets/{ruta.name}")
+    if not persistentes:
+        _escribir_env(valores)
     datos["activo"] = identificador
     _escribir_perfiles(datos)
-    object.__setattr__(settings, "sii_rut", perfil["rut"])
-    object.__setattr__(settings, "sii_cert_path", ruta_env)
-    object.__setattr__(settings, "sii_cert_password", perfil["password"])
-    object.__setattr__(settings, "sii_perfil", identificador)
-    os.environ.update({"SII_RUT": perfil["rut"], "SII_CERT_PATH": ruta_env,
-                       "SII_CERT_PASSWORD": perfil["password"], "SII_PERFIL": identificador})
+    _configurar_proceso(valores)
     return estado()
+
+
+def _valores_perfil(identificador: str, perfil: dict, ruta: str) -> dict[str, str]:
+    return {"SII_RUT": perfil["rut"], "SII_CERT_PATH": ruta,
+            "SII_CERT_PASSWORD": perfil["password"], "SII_PERFIL": identificador}
+
+
+def _configurar_proceso(valores: dict[str, str | None]) -> None:
+    for clave, valor in valores.items():
+        object.__setattr__(settings, clave.lower(), valor)
+        if valor is None:
+            os.environ.pop(clave, None)
+        else:
+            os.environ[clave] = valor
+
+
+def restaurar_perfil_persistente() -> None:
+    """Carga el perfil activo del volumen en un proceso nuevo."""
+    if not _perfiles_persistentes():
+        return
+    datos = _leer_perfiles()
+    identificador = datos["activo"]
+    perfil = datos["perfiles"].get(identificador)
+    if identificador and perfil:
+        _configurar_proceso(_valores_perfil(identificador, perfil, str(_archivo_perfil(perfil))))
+    else:
+        _configurar_proceso(dict.fromkeys(("SII_RUT", "SII_CERT_PATH", "SII_CERT_PASSWORD", "SII_PERFIL")))
 
 
 def _validar(rut: str, password: str, contenido: bytes) -> str:
@@ -372,9 +401,10 @@ def editar(identificador: str, nombre: str, rut: str, password: str | None,
         perfil["client_id"] = client_id.strip()
     if client_secret is not None:
         perfil["client_secret"] = client_secret
-    _escribir_perfiles(datos)
     if datos.get("activo") == identificador:
         _activar(identificador, datos)
+    else:
+        _escribir_perfiles(datos)
     return detalle(identificador)
 
 

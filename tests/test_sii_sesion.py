@@ -56,6 +56,21 @@ def test_fallo_de_proxy_no_dispara_login_nuevo():
         login.assert_not_called()
 
 
+def test_fallo_al_abrir_chromium_libera_playwright_en_login_y_reuso():
+    cliente = _cliente()
+    cliente._cert_pem_file = Path("certificado-de-prueba.pem")
+    with TemporaryDirectory() as temporal:
+        cliente.archivo_cookies = Path(temporal) / "cookies.json"
+        cliente.archivo_cookies.write_text("{}", encoding="utf-8")
+        for abrir in (cliente.login_with_browser, cliente.abrir_sesion):
+            with patch("playwright.sync_api.sync_playwright") as inicio:
+                playwright = inicio.return_value.start.return_value
+                playwright.chromium.launch.side_effect = RuntimeError("Chromium no disponible")
+                with TestCase().assertRaisesRegex(RuntimeError, "Chromium no disponible"):
+                    abrir()
+                playwright.stop.assert_called_once_with()
+
+
 def test_error_de_chromium_durante_login_no_expone_url_del_sii():
     cliente = _cliente()
     cliente._cert_pem_file = Path("certificado-de-prueba.pem")
@@ -140,6 +155,7 @@ if __name__ == "__main__":
     test_navegacion_reintenta_una_vez_si_falla_el_proxy_local()
     test_proxy_persistente_no_se_interpreta_como_cookie_vencida()
     test_fallo_de_proxy_no_dispara_login_nuevo()
+    test_fallo_al_abrir_chromium_libera_playwright_en_login_y_reuso()
     test_error_de_chromium_durante_login_no_expone_url_del_sii()
     test_cierre_guarda_cookies_antes_de_cerrar_contexto()
     test_guardado_atomico_no_pisa_sesion_anterior_si_falla()

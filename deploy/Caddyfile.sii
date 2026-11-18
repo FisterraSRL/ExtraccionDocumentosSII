@@ -1,0 +1,11 @@
+sii.fisterragroup.com {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy same-origin
+		-Server
+	}
+
+	reverse_proxy web:8000
+}
