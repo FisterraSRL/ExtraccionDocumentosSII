@@ -1,0 +1,19 @@
+[Unit]
+Description=Deploy a tested SII release from GitHub
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/sii-deploy.py
+StateDirectory=sii-deploy
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/sii-deploy
+Environment=HOME=/var/lib/sii-deploy
+UMask=0077
+TimeoutStartSec=20min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
