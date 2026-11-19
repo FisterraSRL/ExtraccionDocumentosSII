@@ -599,13 +599,15 @@ def _completar_items(
 
     if empresa:
         empresa.en_portal_fe = True
-    indice = {(_norm_rut(r["rut_emisor"]), str(r["folio"]).strip()): r for r in recibidos}
+    filas_por_emisor_folio = {
+        (_norm_rut(r["rut_emisor"]), str(r["folio"]).strip()): r for r in recibidos
+    }
 
     for documento in pendientes:
         # Si ya se sabe el código del PDF de una vez anterior, se usa directamente: la
         # grilla filtra por fecha de emisión y hay documentos que quedan fuera de la
         # ventana consultada, con lo cual un reproceso nunca los alcanzaría.
-        fila = indice.get((_norm_rut(documento.proveedor_rut), str(documento.folio)))
+        fila = filas_por_emisor_folio.get((_norm_rut(documento.proveedor_rut), str(documento.folio)))
         codigo = documento.pdf_codigo or (fila["codigo"] if fila else None)
         if not codigo:
             continue

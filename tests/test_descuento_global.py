@@ -2,11 +2,16 @@
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.db import Base
 from app.finnegans.client import FinnegansClient, FinnegansMapeoError
-from app.models import Documento
+from app.models import DescuentoGlobalDocumento, DescuentoGlobalLinea, Documento
+from app.routers.documents import _completar_items
 from app.sii.pdf_dte import DetalleDTE, FIN_ITEMS, ItemDTE, _leer_totales, _verificar
 
 
@@ -52,6 +57,44 @@ def test_pdf_reconoce_descuento_global_y_concilia_redondeos():
     _verificar(detalle)
     assert detalle.cuadra
     assert detalle.observacion is None
+
+
+def test_sincroniza_varios_documentos_con_descuentos_globales():
+    motor = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(motor)
+    cliente = Mock()
+    cliente.listar_recibidos_portal.return_value = [
+        {"rut_emisor": "EMISOR", "folio": folio, "codigo": f"PDF-{folio}"}
+        for folio in (1, 2)
+    ]
+    cliente.get_pdf_documento.side_effect = lambda codigo, session: codigo.encode()
+    cliente.extraer_detalle_pdf.side_effect = {
+        f"PDF-{folio}".encode(): DetalleDTE(
+            items=[ItemDTE(f"Producto {folio}", 1, 100, 100)],
+            descuentos_globales=[{"importe": folio}, {"importe": 10}],
+            totales={"descuento_global": folio + 10},
+        )
+        for folio in (1, 2)
+    }.__getitem__
+
+    with Session(motor, autoflush=False) as db:
+        for folio in (1, 2):
+            db.add(Documento(empresa_rut="EMPRESA", proveedor_rut="EMISOR",
+                             proveedor_nombre="Prueba", tipo="33", folio=folio,
+                             fecha=date(2025, 1, 2), total=90 - folio))
+        _completar_items(db, cliente, None, "EMPRESA", ["2025-01"])
+        db.commit()
+
+    with Session(motor) as db:
+        documentos = db.scalars(select(Documento).order_by(Documento.folio)).all()
+        assert [d.pdf_codigo for d in documentos] == ["PDF-1", "PDF-2"]
+        for doc in documentos:
+            assert doc.items[0]["desc"] == f"Producto {doc.folio}"
+            assert db.get(DescuentoGlobalDocumento, doc.id).importe == doc.folio + 10
+            lineas = db.scalars(select(DescuentoGlobalLinea).where(
+                DescuentoGlobalLinea.documento_id == doc.id
+            ).order_by(DescuentoGlobalLinea.indice))
+            assert [(linea.indice, linea.importe) for linea in lineas] == [(0, doc.folio), (1, 10)]
 
 
 def test_payload_mantiene_items_y_descuento_en_linea_separada():
