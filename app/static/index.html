@@ -946,12 +946,12 @@
         return false;
       } else {
         docs = r.data || [];
-        setConnStatus("ok", "Conectado a tu backend local");
+        setConnStatus("ok", "Conectado al servidor");
         return true;
       }
     }).catch(function(){
       if(consulta !== consultaDocumentos || empresaConsultada !== empresaActual) return null;
-      setConnStatus("error", "No se pudo conectar con el backend. ¿Está corriendo \"uvicorn app.main:app --reload\"?");
+      setConnStatus("error", "No se pudo conectar con el servidor.");
       docs = [];
       return false;
     }).then(function(cargados){
