@@ -1,18 +1,4 @@
-"""Autenticación del portal.
-
-Por qué existe: la bandeja muestra documentos tributarios de clientes. Mientras todo
-corría en `localhost` eso no era un problema; publicado en internet, sí. Esto es lo
-mínimo para que la URL no quede abierta.
-
-Cómo funciona: usuario y contraseña se configuran por variables de entorno
-(`PORTAL_USUARIO`, `PORTAL_PASSWORD`). Al entrar se emite una cookie firmada con HMAC
-sobre `SECRET_KEY`, con vencimiento. No hay base de usuarios ni registro: es un portal
-interno para el equipo de administración, y agregar una tabla de usuarios sin necesidad
-sería más superficie para mantener y para equivocarse.
-
-Deliberadamente **no** se guarda la contraseña en ningún lado ni se compara con `==`
-(se usa `compare_digest`, que no filtra información por el tiempo que tarda).
-"""
+"""Cuentas del portal, sesiones firmadas y controles de acceso."""
 from __future__ import annotations
 
 import base64
@@ -20,84 +6,133 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
+from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
 from fastapi import Cookie, HTTPException, Request, Response
+from sqlalchemy import func, select
 
+from app import configuracion_sii
 from app.configuracion_sii import es_entorno_local
+from app.contexto_usuario import Principal, actual
+from app.db import SessionLocal
+from app.models import Usuario, UsuarioCertificado
 
 COOKIE = "portal_sesion"
-DURACION_SEGUNDOS = 12 * 60 * 60  # una jornada de trabajo
-
-# Entrar sin pasar por el login. Es para el desarrollo local, donde volver a
-# autenticarse cada 12 horas no protege de nada: el portal escucha en la propia
-# máquina. Apagado salvo que se lo pida a propósito, y aun así no alcanza para abrir
-# el portal publicado — ver sesion_automatica().
-SIN_LOGIN = os.getenv("PORTAL_SIN_LOGIN", "").lower() in ("1", "true", "si")
-
-# Con quién se registra la actividad cuando se entró sin login.
-USUARIO_LOCAL = "local"
-
-# El pedido tiene que venir de la propia máquina. Se compara contra el socket, no
-# contra cabeceras como X-Forwarded-For, que las escribe quien llama.
+DURACION_SEGUNDOS = 12 * 60 * 60
+ITERACIONES_PBKDF2 = 600_000
 _LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
+_HASH_FICTICIO: str | None = None
 
 
 class ConfiguracionAuthError(RuntimeError):
-    """Falta configurar el acceso al portal."""
+    """Falta configurar la autenticación del portal."""
 
 
-def _config() -> tuple[str, str, bytes]:
-    usuario = os.getenv("PORTAL_USUARIO", "")
-    password = os.getenv("PORTAL_PASSWORD", "")
-    secreto = os.getenv("SECRET_KEY", "")
-    if not usuario or not password:
-        raise ConfiguracionAuthError(
-            "Faltan PORTAL_USUARIO y/o PORTAL_PASSWORD. Sin eso el portal no puede "
-            "validar a nadie, y se niega a abrirse en vez de quedar sin protección."
+def hash_password(password: str) -> str:
+    if not password or len(password) > 1024:
+        raise ValueError("Ingresá una contraseña de hasta 1024 caracteres.")
+    sal = secrets.token_bytes(16)
+    resumen = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), sal, ITERACIONES_PBKDF2)
+    return "pbkdf2_sha256${}${}${}".format(
+        ITERACIONES_PBKDF2,
+        base64.urlsafe_b64encode(sal).decode("ascii"),
+        base64.urlsafe_b64encode(resumen).decode("ascii"),
+    )
+
+
+def verificar_password(password: str, almacenado: str) -> bool:
+    try:
+        algoritmo, iteraciones, sal, resumen = almacenado.split("$", 3)
+        if algoritmo != "pbkdf2_sha256" or not 600_000 <= int(iteraciones) <= 2_000_000:
+            return False
+        calculado = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), base64.urlsafe_b64decode(sal), int(iteraciones)
         )
-    if not secreto:
-        raise ConfiguracionAuthError(
-            "Falta SECRET_KEY: es lo que firma la cookie de sesión. Generá una con "
-            "`python -c \"import secrets; print(secrets.token_hex(32))\"`."
-        )
-    return usuario, password, secreto.encode("utf-8")
+        return hmac.compare_digest(calculado, base64.urlsafe_b64decode(resumen))
+    except (TypeError, ValueError, UnicodeError, base64.binascii.Error):
+        return False
+
+
+def _secreto() -> bytes:
+    valor = os.getenv("SECRET_KEY", "")
+    if not valor:
+        raise ConfiguracionAuthError("Falta SECRET_KEY para firmar las sesiones del portal.")
+    return valor.encode("utf-8")
+
+
+def sembrar_administrador() -> None:
+    """Crea la primera cuenta desde secretos del entorno, sin reescribirla al reiniciar."""
+    email = os.getenv("PORTAL_ADMIN_EMAIL", "").strip().lower()
+    password = os.getenv("PORTAL_ADMIN_PASSWORD", "")
+    if not email or not password:
+        return
+    with SessionLocal() as db:
+        if db.scalar(select(func.count()).select_from(Usuario)):
+            return
+        db.add(Usuario(
+            email=email, password_hash=hash_password(password), rol="administrador",
+            perfil_activo=configuracion_sii.estado()["activo"],
+        ))
+        db.commit()
 
 
 def auth_configurada() -> bool:
     try:
-        _config()
-        return True
-    except ConfiguracionAuthError:
+        _secreto()
+        with SessionLocal() as db:
+            return bool(db.scalar(select(func.count()).select_from(Usuario)))
+    except Exception:
         return False
+
+
+def autenticar(email: str, password: str) -> Principal | None:
+    global _HASH_FICTICIO
+    _secreto()
+    correo = email.strip().lower()
+    with SessionLocal() as db:
+        usuario = db.scalar(select(Usuario).where(Usuario.email == correo))
+        if usuario is None:
+            if _HASH_FICTICIO is None:
+                _HASH_FICTICIO = hash_password("credencial-inexistente")
+            verificar_password(password, _HASH_FICTICIO)
+            return None
+        ahora = datetime.utcnow()
+        if usuario.bloqueado_hasta and usuario.bloqueado_hasta > ahora:
+            return None
+        if not verificar_password(password, usuario.password_hash) or not usuario.activo:
+            usuario.intentos_fallidos += 1
+            if usuario.intentos_fallidos >= 5:
+                usuario.bloqueado_hasta = ahora + timedelta(minutes=15)
+                usuario.intentos_fallidos = 0
+            db.commit()
+            return None
+        usuario.intentos_fallidos = 0
+        usuario.bloqueado_hasta = None
+        db.commit()
+        return Principal(usuario.id, usuario.email, usuario.rol, usuario.perfil_activo)
 
 
 def _firmar(datos: bytes, secreto: bytes) -> str:
     return hmac.new(secreto, datos, hashlib.sha256).hexdigest()
 
 
-def credenciales_validas(usuario: str, password: str) -> bool:
-    esperado_usuario, esperado_password, _ = _config()
-    # Se comparan las dos siempre, sin cortocircuito, para no revelar cuál falló.
-    ok_usuario = hmac.compare_digest(usuario or "", esperado_usuario)
-    ok_password = hmac.compare_digest(password or "", esperado_password)
-    return ok_usuario and ok_password
-
-
-def emitir_cookie(response: Response, usuario: str) -> None:
-    _, _, secreto = _config()
-    payload = json.dumps({"u": usuario, "exp": int(time.time()) + DURACION_SEGUNDOS})
-    datos = base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
-    valor = f"{datos}.{_firmar(datos.encode('ascii'), secreto)}"
+def emitir_cookie(response: Response, principal: Principal) -> None:
+    if principal.id is None:
+        raise ValueError("Las sesiones automáticas no emiten cookies.")
+    with SessionLocal() as db:
+        usuario = db.get(Usuario, principal.id)
+        if usuario is None or not usuario.activo:
+            raise ValueError("La cuenta ya no está activa.")
+        version = usuario.version_sesion
+    datos = base64.urlsafe_b64encode(json.dumps({
+        "uid": principal.id, "sv": version, "exp": int(time.time()) + DURACION_SEGUNDOS,
+    }, separators=(",", ":")).encode("utf-8")).decode("ascii")
+    valor = f"{datos}.{_firmar(datos.encode('ascii'), _secreto())}"
     response.set_cookie(
-        COOKIE,
-        valor,
-        max_age=DURACION_SEGUNDOS,
-        httponly=True,   # que el JavaScript de la página no pueda leerla
-        samesite="lax",
-        # En producción va por HTTPS; en desarrollo sobre localhost tiene que poder
-        # viajar sin TLS o no habría forma de entrar.
+        COOKIE, valor, max_age=DURACION_SEGUNDOS, httponly=True, samesite="lax",
         secure=os.getenv("PORTAL_COOKIE_INSEGURA", "").lower() not in ("1", "true", "si"),
         path="/",
     )
@@ -107,63 +142,40 @@ def borrar_cookie(response: Response) -> None:
     response.delete_cookie(COOKIE, path="/")
 
 
-def sesion_valida(valor: str | None) -> str | None:
-    """Devuelve el usuario si la cookie es legítima y no venció; si no, None."""
+def sesion_valida(valor: str | None) -> Principal | None:
     if not valor or "." not in valor:
         return None
     try:
-        _, _, secreto = _config()
-    except ConfiguracionAuthError:
-        return None
-    datos, _, firma = valor.rpartition(".")
-    if not hmac.compare_digest(firma, _firmar(datos.encode("ascii"), secreto)):
-        return None
-    try:
+        datos, _, firma = valor.rpartition(".")
+        if not hmac.compare_digest(firma, _firmar(datos.encode("ascii"), _secreto())):
+            return None
         payload = json.loads(base64.urlsafe_b64decode(datos.encode("ascii")))
-    except Exception:
+        if int(payload["exp"]) < time.time():
+            return None
+        with SessionLocal() as db:
+            usuario = db.get(Usuario, int(payload["uid"]))
+            if not usuario or not usuario.activo or usuario.version_sesion != int(payload["sv"]):
+                return None
+            perfil = usuario.perfil_activo
+            if usuario.rol != "administrador" and perfil and not db.get(UsuarioCertificado, (usuario.id, perfil)):
+                perfil = None
+            return Principal(usuario.id, usuario.email, usuario.rol, perfil)
+    except (ConfiguracionAuthError, KeyError, ValueError, TypeError, UnicodeError, OverflowError):
         return None
-    if int(payload.get("exp", 0)) < time.time():
+
+
+def sesion_automatica(request: Request) -> Principal | None:
+    if os.getenv("PORTAL_SIN_LOGIN", "").lower() not in ("1", "true", "si"):
         return None
-    return payload.get("u")
-
-
-def sesion_automatica(request: Request) -> str | None:
-    """Usuario con el que entrar sin login, o None si no corresponde.
-
-    Tienen que darse las tres condiciones, y cada una tapa un agujero distinto:
-
-    1. `PORTAL_SIN_LOGIN` activado. Nadie se queda sin login por descuido.
-    2. El pedido viene de la propia máquina. Vale aunque el servidor se levante con
-       `--host 0.0.0.0`: lo que se mira es de dónde vino la conexión.
-    3. No estamos en el despliegue serverless, donde el portal tiene URL pública y
-       muestra documentos tributarios de clientes.
-
-    Con las tres, una variable que se escape al entorno equivocado no abre nada.
-    """
-    if not SIN_LOGIN:
-        return None
-    if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+    if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("PORTAL_ADMIN_ORIGIN"):
         return None
     cliente = getattr(request, "client", None)
     if cliente is None or cliente.host not in _LOOPBACK:
         return None
-    return USUARIO_LOCAL
-
-
-def requiere_sesion(
-    request: Request, portal_sesion: str | None = Cookie(default=None)
-) -> str:
-    """Dependencia de FastAPI: corta el pedido si no hay sesión iniciada."""
-    _validar_origen(request)
-    usuario = sesion_valida(portal_sesion) or sesion_automatica(request)
-    if not usuario:
-        raise HTTPException(status_code=401, detail="Hay que iniciar sesión.")
-    return usuario
+    return Principal(None, "local", "administrador", None)
 
 
 def _validar_origen(request: Request, origen_publicado: str | None = None) -> None:
-    # El modo local sin login y el CORS de desarrollo no deben permitir que una
-    # página ajena lea credenciales o dispare un envío mediante el navegador.
     origen = request.headers.get("origin")
     host = request.headers.get("host")
     if origen_publicado:
@@ -178,19 +190,37 @@ def _validar_origen(request: Request, origen_publicado: str | None = None) -> No
         raise HTTPException(status_code=403, detail="El origen de la solicitud no está permitido.")
 
 
-def requiere_sesion_gestion(
-    request: Request, portal_sesion: str | None = Cookie(default=None)
-) -> str:
-    """Permite la gestión remota solo en el origen HTTPS publicado y con cookie firmada."""
+def requiere_sesion(request: Request, portal_sesion: str | None = Cookie(default=None)) -> Principal:
+    _validar_origen(request)
+    principal = actual() or sesion_valida(portal_sesion) or sesion_automatica(request)
+    if not principal:
+        raise HTTPException(status_code=401, detail="Hay que iniciar sesión.")
+    return principal
+
+
+def requiere_sesion_gestion(request: Request, portal_sesion: str | None = Cookie(default=None)) -> Principal:
     origen_publicado = os.getenv("PORTAL_ADMIN_ORIGIN")
     if not origen_publicado:
-        usuario = requiere_sesion(request, portal_sesion)
+        principal = requiere_sesion(request, portal_sesion)
         if not es_entorno_local(request):
             raise HTTPException(status_code=404, detail="No disponible.")
-        return usuario
-
+        return principal
     _validar_origen(request, origen_publicado)
-    usuario = sesion_valida(portal_sesion)
-    if not usuario:
+    principal = actual() or sesion_valida(portal_sesion)
+    if not principal:
         raise HTTPException(status_code=401, detail="Hay que iniciar sesión.")
-    return usuario
+    return principal
+
+
+def requiere_administrador(request: Request, portal_sesion: str | None = Cookie(default=None)) -> Principal:
+    principal = requiere_sesion(request, portal_sesion)
+    if not principal.administrador:
+        raise HTTPException(status_code=403, detail="Solo un administrador puede realizar esta acción.")
+    return principal
+
+
+def requiere_administrador_gestion(request: Request, portal_sesion: str | None = Cookie(default=None)) -> Principal:
+    principal = requiere_sesion_gestion(request, portal_sesion)
+    if not principal.administrador:
+        raise HTTPException(status_code=403, detail="Solo un administrador puede realizar esta acción.")
+    return principal

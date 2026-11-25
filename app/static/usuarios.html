@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administración de usuarios · SII</title>
+  <style>
+    :root{font-family:Montserrat,"Segoe UI",Arial,sans-serif;color:#0a2f43;background:#e7e9ed}
+    *{box-sizing:border-box}body{margin:0}main{max-width:1160px;margin:auto;padding:26px 20px 60px}
+    header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+    h1{font-size:2rem;color:#222e58;margin:0}h2{font-size:1.2rem;margin:0 0 16px;color:#222e58}
+    a{color:#0a2f43;font-weight:700}header a{margin-left:auto}
+    .layout{display:grid;grid-template-columns:minmax(230px,340px) minmax(0,1fr);gap:20px}
+    .card{background:#fff;border-radius:18px;padding:22px;box-shadow:0 3px 15px #0a2f4312}
+    .list{display:grid;gap:8px;margin:16px 0}.item{width:100%;text-align:left;padding:12px;border-radius:10px;border:1px solid #c7ced7;background:#f7f8fa;color:#0a2f43;cursor:pointer;font:inherit}
+    .item.active{border-color:#0a2f43;background:#e8f3f8}.item small{display:block;color:#667886;margin-top:4px}
+    button{font:inherit;cursor:pointer}.primary{border:0;border-radius:10px;background:#f52125;color:white;padding:11px 16px;font-weight:700}.secondary{border:1px solid #bbc6d0;border-radius:10px;background:#fff;color:#0a2f43;padding:10px 15px;font-weight:700}
+    form{display:grid;gap:16px}.field{display:grid;gap:6px;font-size:.9rem;font-weight:700}input[type=email],input[type=password],input[type=text],select{width:100%;padding:10px;border:1px solid #aebbc7;border-radius:8px;background:#fff;color:#0a2f43;font:inherit}.password-control{display:flex;gap:8px}.password-control input{flex:1;min-width:0}.password-control button{border:1px solid #aebbc7;border-radius:8px;background:#fff;color:#0a2f43;padding:0 10px;font-weight:700}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.check{display:flex;gap:9px;align-items:center;font-size:.9rem}.check input{width:18px;height:18px}
+    .note{color:#657788;font-size:.86rem;line-height:1.5}.error{color:#9b2730;background:#ffe9e9;padding:11px;border-radius:8px}.success{color:#1d6948;background:#e6f5ee;padding:11px;border-radius:8px}
+    .cert{border:1px solid #cbd4dc;border-radius:12px;padding:14px;margin:10px 0;background:#fafbfc}.catalogo{margin-top:14px}.catalogo h3{font-size:.92rem;margin:0 0 7px}.companies{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:7px;max-height:210px;overflow:auto}.companies .check{align-items:flex-start;font-size:.81rem}.muted{opacity:.55}
+    @media(max-width:760px){.layout{grid-template-columns:1fr}.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body><main>
+  <header><h1>Administración de usuarios</h1><a href="/">Volver a la bandeja</a></header>
+  <div class="layout">
+    <section class="card"><h2>Usuarios</h2><button class="primary" id="nuevo" type="button">+ Nuevo usuario</button><div class="list" id="lista"></div></section>
+    <section class="card"><h2 id="titulo">Nuevo usuario</h2>
+      <form id="form">
+        <div class="row"><label class="field">Correo electrónico<input id="email" type="email" required autocomplete="off"></label><label class="field">Rol<select id="rol"><option value="usuario">Usuario</option><option value="administrador">Administrador</option></select></label></div>
+        <div class="field"><label for="password">Contraseña</label><div class="password-control"><input id="password" type="password" minlength="12" autocomplete="new-password"><button id="mostrarPassword" type="button" aria-controls="password" aria-pressed="false">Mostrar</button></div><span class="note" id="passwordAyuda">Al menos 12 caracteres.</span></div>
+        <label class="check"><input id="activo" type="checkbox" checked> Cuenta activa</label>
+        <div><h2>Certificados y empresas</h2><p class="note">Por cada certificado, elegí las empresas del SII que aparecerán en la bandeja y las sucursales Finnegans a las que podrá enviar. Los administradores tienen acceso total.</p><div id="certificados"></div></div>
+        <div id="mensaje" role="status" hidden></div>
+        <div><button class="primary" id="guardar" type="submit">Guardar usuario</button></div>
+      </form>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+var usuarios=[], perfiles=[], seleccionado=null, catalogos={}, catalogosSii={};
+var $=function(id){return document.getElementById(id)};
+async function api(ruta, opciones){
+  var respuesta=await fetch(ruta,Object.assign({credentials:"same-origin",cache:"no-store"},opciones||{}));
+  var datos=await respuesta.json().catch(function(){return {}});
+  if(!respuesta.ok) throw new Error(datos.detail||"Error "+respuesta.status);
+  return datos;
+}
+function mensaje(texto,error){var nodo=$("mensaje");nodo.hidden=!texto;nodo.className=error?"error":"success";nodo.textContent=texto||""}
+function seleccionActual(){return usuarios.find(function(u){return u.id===seleccionado})}
+function pintarLista(){
+  $("lista").replaceChildren();
+  usuarios.forEach(function(u){
+    var boton=document.createElement("button");boton.type="button";boton.className="item"+(u.id===seleccionado?" active":"");
+    boton.textContent=u.email;
+    var nota=document.createElement("small");nota.textContent=(u.rol==="administrador"?"Administrador":"Usuario")+(u.activo?"":" · Inactivo");boton.appendChild(nota);
+    boton.addEventListener("click",function(){seleccionado=u.id;pintar()});$("lista").appendChild(boton);
+  });
+}
+function pintarOpciones(contenedor,filas,clave,seleccionadas){
+  contenedor.replaceChildren();contenedor.classList.remove("error");
+  filas.forEach(function(empresa){
+    var etiqueta=document.createElement("label");etiqueta.className="check";
+    var casilla=document.createElement("input");casilla.type="checkbox";casilla.value=empresa[clave];casilla.checked=seleccionadas.includes(empresa[clave]);
+    etiqueta.append(casilla,document.createTextNode(empresa.nombre+" · "+empresa[clave]));contenedor.appendChild(etiqueta);
+  });
+}
+async function cargarCatalogos(perfil,caja,asignado){
+  var sii=caja.querySelector(".empresas-sii"), finnegans=caja.querySelector(".empresas-finnegans");
+  caja.dataset.catalogosListos="0";
+  sii.textContent="Cargando empresas SII…";finnegans.textContent="Cargando sucursales Finnegans…";
+  try{
+    var resultados=await Promise.all([
+      catalogosSii[perfil]||api("/api/administracion/certificados/"+encodeURIComponent(perfil)+"/empresas-sii"),
+      catalogos[perfil]||api("/api/administracion/certificados/"+encodeURIComponent(perfil)+"/empresas")
+    ]);
+    catalogosSii[perfil]=resultados[0];catalogos[perfil]=resultados[1];
+    pintarOpciones(sii,resultados[0].empresas,"rut",asignado?asignado.empresas_sii||[]:[]);
+    pintarOpciones(finnegans,resultados[1],"codigo",asignado?asignado.empresas||[]:[]);
+    if(!resultados[0].empresas.length)sii.textContent=resultados[0].consultado?"El certificado no tiene empresas SII disponibles.":"Primero consultá las empresas de este certificado desde Configuración o la bandeja.";
+    if(!resultados[1].length)finnegans.textContent="No hay sucursales Finnegans disponibles.";
+    caja.dataset.catalogosListos="1";
+  }catch(error){sii.textContent="No se pudieron cargar las empresas: "+error.message;finnegans.textContent="";sii.classList.add("error")}
+}
+function pintarCertificados(){
+  var usuario=seleccionActual(), raiz=$("certificados");raiz.replaceChildren();
+  var admin=$("rol").value==="administrador";
+  raiz.classList.toggle("muted",admin);
+  if(admin){raiz.textContent="Acceso a todos los certificados y empresas.";return}
+  perfiles.forEach(function(perfil){
+    var asignado=usuario&&usuario.certificados.find(function(c){return c.perfil_id===perfil.id});
+    var caja=document.createElement("section");caja.className="cert";caja.dataset.perfil=perfil.id;
+    var etiqueta=document.createElement("label");etiqueta.className="check";
+    var casilla=document.createElement("input");casilla.type="checkbox";casilla.className="perfil-check";casilla.checked=!!asignado;
+    etiqueta.append(casilla,document.createTextNode(perfil.nombre));caja.appendChild(etiqueta);
+    var grupos=document.createElement("div");grupos.hidden=!casilla.checked;
+    [["Empresas SII para la bandeja","empresas-sii"],["Sucursales Finnegans para el envío","empresas-finnegans"]].forEach(function(datos){
+      var grupo=document.createElement("div");grupo.className="catalogo";
+      var titulo=document.createElement("h3");titulo.textContent=datos[0];
+      var empresas=document.createElement("div");empresas.className="companies "+datos[1];
+      grupo.append(titulo,empresas);grupos.appendChild(grupo);
+    });
+    caja.appendChild(grupos);
+    casilla.addEventListener("change",function(){grupos.hidden=!casilla.checked;if(casilla.checked&&caja.dataset.catalogosListos!=="1")cargarCatalogos(perfil.id,caja,null)});
+    raiz.appendChild(caja);
+    if(asignado)cargarCatalogos(perfil.id,caja,asignado);
+  });
+  if(!perfiles.length)raiz.textContent="Primero cargá certificados en Configuración.";
+}
+function pintar(){
+  var u=seleccionActual();pintarLista();$("titulo").textContent=u?"Editar usuario":"Nuevo usuario";
+  $("email").value=u?u.email:"";$("rol").value=u?u.rol:"usuario";$("activo").checked=u?u.activo:true;
+  $("password").value="";$("password").type="password";$("mostrarPassword").textContent="Mostrar";$("mostrarPassword").setAttribute("aria-pressed","false");$("password").required=!u;
+  $("passwordAyuda").textContent=u?"Dejá en blanco para conservar la contraseña. Una nueva debe tener al menos 12 caracteres.":"Al menos 12 caracteres.";
+  mensaje("");pintarCertificados();
+}
+$("nuevo").addEventListener("click",function(){seleccionado=null;pintar()});
+$("mostrarPassword").addEventListener("click",function(){
+  var visible=$("password").type==="password";$("password").type=visible?"text":"password";
+  this.textContent=visible?"Ocultar":"Mostrar";this.setAttribute("aria-pressed",visible?"true":"false");
+});
+$("rol").addEventListener("change",pintarCertificados);
+$("form").addEventListener("submit",async function(event){
+  event.preventDefault();
+  if(Array.from(document.querySelectorAll(".cert")).some(function(caja){return caja.querySelector(".perfil-check").checked&&caja.dataset.catalogosListos!=="1"})){
+    mensaje("Esperá a que carguen las empresas de cada certificado antes de guardar.",true);return;
+  }
+  var boton=$("guardar");boton.disabled=true;mensaje("");
+  var u=seleccionActual(), permisos=[];
+  if($("rol").value!=="administrador"){
+    document.querySelectorAll(".cert").forEach(function(caja){
+      if(!caja.querySelector(".perfil-check").checked)return;
+      permisos.push({perfil_id:caja.dataset.perfil,
+        empresas_sii:Array.from(caja.querySelectorAll(".empresas-sii input:checked")).map(function(c){return c.value}),
+        empresas:Array.from(caja.querySelectorAll(".empresas-finnegans input:checked")).map(function(c){return c.value})});
+    });
+  }
+  var datos={email:$("email").value,password:$("password").value||null,rol:$("rol").value,activo:$("activo").checked,certificados:permisos};
+  try{
+    var guardado=await api(u?"/api/administracion/usuarios/"+u.id:"/api/administracion/usuarios",{method:u?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(datos)});
+    usuarios=await api("/api/administracion/usuarios");seleccionado=guardado.id;pintar();mensaje("Usuario guardado.",false);
+  }catch(error){mensaje(error.message,true)}finally{boton.disabled=false}
+});
+Promise.all([api("/api/administracion/usuarios"),api("/api/certificados-disponibles")]).then(function(resultados){
+  usuarios=resultados[0];perfiles=resultados[1].perfiles;pintar();
+}).catch(function(error){mensaje(error.message,true)});
+</script></body></html>

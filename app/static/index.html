@@ -126,31 +126,30 @@
     letter-spacing:.05em; color:#0A2F43;}
   .login-card input{padding:10px 12px; border-radius:10px; font:inherit;
     border:1px solid rgba(10,47,67,.22); color:#0A2F43; background:#fff;}
+  .password-control{display:flex;align-items:stretch;gap:8px;min-width:0;}
+  .password-control input{flex:1;min-width:0;width:auto;}
+  .password-control button{flex:none;border:1px solid rgba(10,47,67,.22);border-radius:9px;background:#fff;color:var(--fs-navy);font:600 .78rem var(--fs-font);padding:0 10px;cursor:pointer;}
   .login-card .btn{margin-top:12px; justify-content:center;}
   .login-error{padding:9px 12px; border-radius:9px; font-size:.84rem;
     background:#fdecec; border:1px solid #e9b4b4; color:#9C3032;}
-  .cerrar-sesion{margin-left:auto; align-self:center;}
   .app-version{
     font-size:.72rem; font-weight:600; letter-spacing:.06em; color:var(--fs-steel-deep);
     margin-left:10px; align-self:center;
   }
   .perfil-activo{font-size:.76rem;font-weight:700;letter-spacing:.03em;color:var(--fs-navy);background:#e7eef2;border:1px solid #bdced8;border-radius:var(--fs-radius-pill);padding:5px 11px;align-self:center;white-space:nowrap;}
-  .empresa-paso{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
-  .paso-num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
-    border-radius:50%;background:#0A2F43;color:#fff;font-size:.74rem;font-weight:700;flex:none;}
+  .seleccion-origen,.parametros-envio{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start;min-width:0;}
+  .campo-bandeja{display:flex;flex-direction:column;gap:7px;min-width:0;}
+  .campo-encabezado{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:24px;}
+  .empresa-bar .campo-bandeja select,.empresa-bar .campo-bandeja input{width:100%;min-width:0;height:42px;box-sizing:border-box;padding:8px 11px;border:1px solid rgba(10,47,67,.22);border-radius:9px;font:500 .86rem var(--fs-font);color:var(--fs-ink);background:#fff;}
   .empresa-bar #syncBtn:disabled{opacity:.45;cursor:not-allowed;}
-  .empresa-bar{display:flex;align-items:center;gap:8px 26px;flex-wrap:wrap;
-    padding:14px 16px;background:var(--surface,#fff);border:1px solid rgba(10,47,67,.10);
-    border-radius:14px;}
-  .empresa-bar label{font-weight:700;color:#0A2F43;font-size:.82rem;letter-spacing:.04em;
+  .empresa-bar{display:grid;gap:16px;padding:18px 20px;background:var(--surface,#fff);border:1px solid rgba(10,47,67,.10);border-radius:14px;}
+  .empresa-bar label{font-weight:700;color:#0A2F43;font-size:.78rem;letter-spacing:.04em;
     text-transform:uppercase;}
-  .empresa-bar select{min-width:min(340px,100%);padding:8px 10px;border-radius:9px;
-    border:1px solid rgba(10,47,67,.22);font:inherit;color:#0A2F43;background:#fff;}
-  .parametros-envio{flex-basis:100%;display:flex;gap:10px 24px;flex-wrap:wrap;}
-  .parametros-envio label{display:flex;align-items:center;gap:8px;}
-  .parametros-envio input{width:12em;max-width:100%;padding:7px 10px;border:1px solid rgba(10,47,67,.22);border-radius:9px;font:inherit;font-weight:500;color:var(--fs-ink);}
+  .empresa-bar .campo-encabezado .link-btn{font-size:.76rem;white-space:nowrap;}
+  .sincronizacion-fila{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-height:42px;}
+  .parametros-envio{border-top:1px solid rgba(10,47,67,.12);padding-top:16px;}
   .empresa-meta{color:#5b6b75;font-size:.84rem;}
-  .empresa-aviso{flex-basis:100%; margin-top:2px; padding:9px 12px; border-radius:9px;
+  .empresa-aviso{padding:9px 12px;border-radius:9px;
     font-size:.82rem; background:#eef4f8; border:1px solid #c5d8e4; color:#28536b;}
   .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
   .kpi{
@@ -372,10 +371,12 @@
   .certificado-form{display:flex;flex-direction:column;gap:10px;}
   .certificado-form label{font-size:.76rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--fs-navy);}
   .certificado-form input,.certificado-form select{width:100%;box-sizing:border-box;margin-top:5px;padding:9px 10px;border:1px solid var(--fs-steel);border-radius:8px;font:inherit;}
+  .certificado-form .password-control input{width:auto;flex:1;min-width:0;margin-top:0;}
   .certificado-estado{font-size:.82rem;padding:10px 12px;border-radius:9px;background:rgba(10,47,67,.07);line-height:1.4;}
   .header-tools{margin-left:auto;display:inline-flex;align-items:center;gap:8px;flex:none;}
   .header-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;font-size:1.2rem;line-height:1;text-decoration:none;}
   .header-icon img{display:block;width:24px;height:24px;object-fit:contain;mix-blend-mode:multiply;}
+  .header-icon svg{display:block;width:24px;height:24px;}
   .header-icon:hover img{opacity:.72;}
 
   /* ---------- Toast ---------- */
@@ -389,18 +390,16 @@
 
   .empty-state{padding:36px 20px; text-align:center; color:var(--fs-steel-deep); font-size:.9rem; font-weight:500;}
 
+  @media (max-width:760px){
+    .seleccion-origen,.parametros-envio{grid-template-columns:1fr;gap:14px;}
+  }
   @media (max-width:640px){
     body{padding:8px;}
     .wrap{gap:8px;}
-    .empresa-paso{min-width:0;}
-    .empresa-bar select{min-width:0;max-width:100%;}
-    .parametros-envio{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}
-    .parametros-envio label{display:grid;}
-    .parametros-envio input{width:100%;min-width:0;}
     .envio-pie{gap:5px 10px;padding:8px;}
     .tabs{overflow-x:auto;flex:none;}
     .tab-btn{white-space:nowrap;padding:.65em .9em;}
-    .empresa-bar{flex-direction:column; align-items:stretch;}
+    .empresa-bar{padding:16px;}
     .kpis{grid-template-columns:repeat(2,1fr);}
     .header-row{flex-direction:column;}
     .header-tools{margin-left:0;align-self:flex-end;}
@@ -423,7 +422,7 @@
     <label for="loginUsuario">Usuario</label>
     <input type="text" id="loginUsuario" name="username" autocomplete="username" required>
     <label for="loginPassword">Contraseña</label>
-    <input type="password" id="loginPassword" name="password" autocomplete="current-password" required>
+    <div class="password-control"><input type="password" id="loginPassword" name="password" autocomplete="current-password" required><button type="button" id="mostrarLoginPassword" aria-controls="loginPassword" aria-pressed="false">Mostrar</button></div>
     <div class="login-error" id="loginError" hidden></div>
     <button class="btn btn-cta" type="submit" id="loginBtn">Ingresar</button>
   </form>
@@ -435,10 +434,23 @@
     <span class="section-pill">Documentos SII</span>
     <span class="app-version" id="appVersion" title="Versión del portal"></span>
     <span class="perfil-activo" id="perfilActivo" hidden title="Certificado SII activo"></span>
-    <button class="link-btn cerrar-sesion" id="logoutBtn" type="button" hidden>Salir</button>
     <div class="header-tools">
       <a class="link-btn header-icon equivalencias-btn" href="/equivalencias" title="Administrar equivalencias de productos" aria-label="Administrar equivalencias de productos"><img src="/equivalencias-icon.png" alt="" width="24" height="24"></a>
+      <a class="link-btn header-icon" id="usuariosLink" href="/usuarios" title="Administrar usuarios" aria-label="Administrar usuarios" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <circle cx="9" cy="7" r="3"/>
+          <path d="M2.5 20v-2a5.5 5.5 0 0 1 11 0v2H2.5Z"/>
+          <path d="M16 4.8a3 3 0 1 1 0 5.4M16.5 13a5.5 5.5 0 0 1 5 5.5V20h-4"/>
+        </svg>
+      </a>
       <button class="link-btn header-icon" id="certificadosBtn" type="button" title="Configurar certificados SII" aria-label="Configurar certificados SII"><img src="/configuracion-icon.jpg" alt="" width="24" height="24"></button>
+      <button class="link-btn header-icon" id="logoutBtn" type="button" title="Cerrar sesión" aria-label="Cerrar sesión" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M13 4h3a2 2 0 0 1 2 2v14M2 20h3m8 0h9"/>
+          <path d="M13 4.6v14.8a1 1 0 0 1-1.24.97l-6-1.5A1 1 0 0 1 5 17.9V6.1a1 1 0 0 1 .76-.97l6-1.5A1 1 0 0 1 13 4.6Z"/>
+          <circle cx="10" cy="12" r=".8" fill="currentColor" stroke="none"/>
+        </svg>
+      </button>
     </div>
     <svg class="lockup" viewBox="0 0 520 100" role="img" aria-label="Fisterra">
       <title>Fisterra</title>
@@ -462,16 +474,20 @@
   </div>
 
       <div class="empresa-bar">
-        <div class="empresa-paso">
-          <span class="paso-num">1</span>
-          <label for="empresaSelect">Elegí la empresa</label>
-          <select id="empresaSelect" aria-label="Empresa a consultar">
-            <option value="">Cargando empresas…</option>
-          </select>
-          <button class="link-btn" id="renombrarBtn" type="button" title="El SII entrega solo el RUT, no el nombre">Ponerle nombre</button>
+        <div class="seleccion-origen">
+          <div class="campo-bandeja">
+            <div class="campo-encabezado"><label for="perfilDisponible">Certificado SII</label></div>
+            <select id="perfilDisponible" aria-label="Certificado SII activo"></select>
+            <span class="empresa-meta" id="perfilDisponibleEstado"></span>
+          </div>
+          <div class="campo-bandeja">
+            <div class="campo-encabezado"><label for="empresaSelect">Empresa del certificado</label><button class="link-btn" id="renombrarBtn" type="button" title="El SII entrega solo el RUT, no el nombre">Ponerle nombre</button></div>
+            <select id="empresaSelect" aria-label="Empresa a consultar">
+              <option value="">Cargando empresas…</option>
+            </select>
+          </div>
         </div>
-        <div class="empresa-paso">
-          <span class="paso-num">2</span>
+        <div class="sincronizacion-fila">
           <button class="btn btn-cta" id="syncBtn" type="button" disabled>
             <span id="syncIcon">↻</span><span id="syncLabel">Sincronizar con SII</span>
           </button>
@@ -479,8 +495,8 @@
         </div>
         <div class="empresa-aviso" id="empresaAviso" hidden></div>
         <div class="parametros-envio">
-          <label for="empresaDestino">Empresa Destino <input id="empresaDestino" type="text" required autocomplete="off" spellcheck="false"></label>
-          <label for="workflowCodigo">Workflow <input id="workflowCodigo" type="text" required autocomplete="off" spellcheck="false"></label>
+          <div class="campo-bandeja"><div class="campo-encabezado"><label for="empresaDestino">Empresa destino Finnegans</label></div><select id="empresaDestino" required><option value="">Seleccioná una empresa permitida</option></select></div>
+          <div class="campo-bandeja"><div class="campo-encabezado"><label for="workflowCodigo">Workflow</label></div><input id="workflowCodigo" type="text" required autocomplete="off" spellcheck="false"></div>
         </div>
       </div>
   <div class="kpis">
@@ -626,7 +642,7 @@
         <label>Nombre para identificarlo<input id="certificadoNombre" required placeholder="Ej.: Administración"></label>
         <label>RUT del titular<input id="certificadoRut" required placeholder="12345678-9"></label>
         <label>Archivo .pfx o .p12<input id="certificadoArchivo" type="file" accept=".pfx,.p12,application/x-pkcs12" required></label>
-        <label>Contraseña<input id="certificadoPassword" type="password" required autocomplete="new-password"></label>
+        <div><label for="certificadoPassword">Contraseña</label><div class="password-control"><input id="certificadoPassword" type="password" required autocomplete="new-password"><button type="button" id="mostrarCertificadoPassword" aria-controls="certificadoPassword" aria-pressed="false">Mostrar</button></div></div>
         <button class="btn btn-cta" id="guardarCertificadoBtn" type="submit">Guardar y usar certificado</button>
       </form>
     </details>
@@ -688,6 +704,7 @@
   var perfilConfirmado = null;
   var destinoConfirmado = null;
   var empresaDestino = document.getElementById("empresaDestino");
+  var consultaDestinos = 0;
   var workflowCodigo = document.getElementById("workflowCodigo");
   var consultaConfirmacion = null;
 
@@ -710,7 +727,11 @@
     });
   }
 
-  function cerrarCertificados(){ document.getElementById("certificadosOverlay").hidden = true; }
+  function cerrarCertificados(){
+    document.getElementById("certificadosOverlay").hidden = true;
+    document.getElementById("certificadoPassword").value = "";
+    cambiarVisibilidadPassword("certificadoPassword", "mostrarCertificadoPassword", false);
+  }
 
   function mostrarErrorCertificados(texto){
     var caja = document.getElementById("certificadosError");
@@ -758,6 +779,7 @@
       cargarPerfilActivo();
       asociacionesCache.clear();
       restablecerDestino();
+      cargarParametrosEnvio();
       cargarEstadoProductos();
       empresaActual = "";
       try { localStorage.removeItem("empresaActual"); } catch(err){}
@@ -827,7 +849,29 @@
   function mostrarLogin(mostrar){
     document.getElementById("loginOverlay").hidden = !mostrar;
     document.getElementById("logoutBtn").hidden = mostrar || sinLogin;
-    if(mostrar) document.getElementById("loginUsuario").focus();
+    if(mostrar){
+      actualizarAccesos(false);
+      cambiarVisibilidadPassword("loginPassword", "mostrarLoginPassword", false);
+      document.getElementById("loginUsuario").focus();
+    }
+  }
+
+  function actualizarAccesos(administrador){
+    document.getElementById("usuariosLink").hidden = !administrador;
+    document.getElementById("certificadosBtn").hidden = !administrador;
+  }
+
+  function cambiarVisibilidadPassword(campoId, botonId, visible){
+    document.getElementById(campoId).type = visible ? "text" : "password";
+    var boton = document.getElementById(botonId);
+    boton.textContent = visible ? "Ocultar" : "Mostrar";
+    boton.setAttribute("aria-pressed", visible ? "true" : "false");
+  }
+
+  function prepararVisibilidadPassword(campoId, botonId){
+    document.getElementById(botonId).addEventListener("click", function(){
+      cambiarVisibilidadPassword(campoId, botonId, document.getElementById(campoId).type === "password");
+    });
   }
 
   // El backend habilitó la entrada directa (solo corre en la propia máquina). No hay
@@ -838,6 +882,7 @@
     return apiFetch("/api/sesion").then(function(r){
       if(!r.ok) return false;
       sinLogin = !!r.data.sin_login;
+      actualizarAccesos(!!r.data.autenticado && !!r.data.administrador);
       if(sinLogin) return true;
       if(!r.data.configurada){
         // Sin credenciales configuradas no hay a quién validar. Se avisa en vez de
@@ -845,8 +890,8 @@
         mostrarLogin(true);
         var err = document.getElementById("loginError");
         err.hidden = false;
-        err.textContent = "El portal no tiene credenciales configuradas. Definí " +
-          "PORTAL_USUARIO, PORTAL_PASSWORD y SECRET_KEY en el servidor.";
+        err.textContent = "El portal no tiene un administrador inicial. Definí " +
+          "PORTAL_ADMIN_EMAIL, PORTAL_ADMIN_PASSWORD y SECRET_KEY en el servidor.";
         document.getElementById("loginBtn").disabled = true;
         return false;
       }
@@ -874,11 +919,29 @@
   }
 
   function cargarPerfilActivo(){
-    return apiFetch("/api/configuracion/sii", {cache:"no-store"}).then(function(r){
+    return apiFetch("/api/certificados-disponibles", {cache:"no-store"}).then(function(r){
       var etiqueta = document.getElementById("perfilActivo");
-      if(!r.ok || !r.data.nombre_activo){ etiqueta.hidden = true; return; }
-      etiqueta.textContent = "SII: " + r.data.nombre_activo;
-      etiqueta.hidden = false;
+      var selector = document.getElementById("perfilDisponible");
+      var estado = document.getElementById("perfilDisponibleEstado");
+      selector.replaceChildren();
+      if(!r.ok) throw new Error(r.data.detail || "No se pudieron consultar los certificados.");
+      var perfiles = r.data.perfiles || [];
+      var inicial = document.createElement("option");
+      inicial.value = "";
+      inicial.textContent = perfiles.length ? "Seleccioná un certificado" : "Sin certificados asignados";
+      selector.appendChild(inicial);
+      perfiles.forEach(function(perfil){
+        var opcion = document.createElement("option");
+        opcion.value = perfil.id;
+        opcion.textContent = perfil.nombre + (perfil.vencido ? " (vencido)" : "");
+        opcion.disabled = !!perfil.vencido;
+        selector.appendChild(opcion);
+      });
+      selector.value = r.data.activo || "";
+      var activo = perfiles.find(function(p){ return p.id === r.data.activo; });
+      etiqueta.hidden = !activo;
+      etiqueta.textContent = activo ? "SII: " + activo.nombre : "";
+      estado.textContent = !perfiles.length ? "Solicitá acceso a un administrador." : "";
     }).catch(function(){ document.getElementById("perfilActivo").hidden = true; });
   }
 
@@ -1403,19 +1466,38 @@
   // ---------- Envío a Finnegans ----------
 
   function cargarParametrosEnvio(){
-    return apiFetch("/api/finnegans/parametros-envio", {cache:"no-store"}).then(function(r){
-      if(!r.ok) throw new Error();
-      var conservarEmpresa = empresaDestino.value !== empresaDestino.defaultValue;
-      var conservarWorkflow = workflowCodigo.value !== workflowCodigo.defaultValue;
-      empresaDestino.defaultValue = r.data.empresa_codigo || "";
-      workflowCodigo.defaultValue = r.data.workflow_codigo || "";
-      if(!conservarEmpresa) empresaDestino.value = empresaDestino.defaultValue;
-      if(!conservarWorkflow) workflowCodigo.value = workflowCodigo.defaultValue;
-    }).catch(function(){ showToast("Completá empresa destino y workflow para enviar.", true); });
+    var consulta = ++consultaDestinos;
+    var anterior = empresaDestino.value;
+    return Promise.all([
+      apiFetch("/api/finnegans/parametros-envio", {cache:"no-store"}),
+      apiFetch("/api/finnegans/empresas-permitidas", {cache:"no-store"})
+    ]).then(function(respuestas){
+      if(consulta !== consultaDestinos) return;
+      var parametros = respuestas[0], permitidas = respuestas[1];
+      if(!parametros.ok) throw new Error(parametros.data.detail || "No se pudo consultar el workflow.");
+      workflowCodigo.value = parametros.data.workflow_codigo || "";
+      workflowCodigo.defaultValue = workflowCodigo.value;
+      empresaDestino.replaceChildren();
+      var inicial = document.createElement("option");
+      inicial.value = "";
+      inicial.textContent = "Seleccioná una empresa permitida";
+      empresaDestino.appendChild(inicial);
+      if(!permitidas.ok) throw new Error(permitidas.data.detail || "No se pudieron consultar las empresas permitidas.");
+      (permitidas.data.empresas || []).forEach(function(empresa){
+        var opcion = document.createElement("option");
+        opcion.value = empresa.codigo;
+        opcion.textContent = empresa.nombre + " · " + empresa.codigo;
+        empresaDestino.appendChild(opcion);
+      });
+      empresaDestino.value = Array.from(empresaDestino.options).some(function(o){ return o.value === anterior; }) ? anterior : "";
+      if(!permitidas.data.empresas.length) showToast("No hay empresas Finnegans permitidas para este certificado.", true);
+    }).catch(function(error){
+      if(consulta === consultaDestinos) showToast(error.message || "No se pudieron cargar las empresas destino.", true);
+    });
   }
 
   function restablecerDestino(){
-    empresaDestino.value = empresaDestino.defaultValue;
+    empresaDestino.value = "";
     workflowCodigo.value = workflowCodigo.defaultValue;
     cerrarConfirmacion();
   }
@@ -1842,9 +1924,12 @@
     }).then(function(r){
       if(r.ok){
         document.getElementById("loginPassword").value = "";
+        cambiarVisibilidadPassword("loginPassword", "mostrarLoginPassword", false);
+        actualizarAccesos(!!r.data.administrador);
         mostrarLogin(false);
         cargarParametrosEnvio();
         loadVersion();
+        cargarPerfilActivo();
         return loadEmpresas().then(restaurarBandeja);
       }
       err.hidden = false;
@@ -1863,15 +1948,44 @@
       docs = [];
       empresas = [];
       sincronizado = false;
+      document.getElementById("perfilActivo").hidden = true;
+      document.getElementById("perfilDisponible").replaceChildren();
       renderAll();
       mostrarLogin(true);
     });
   });
 
+  prepararVisibilidadPassword("loginPassword", "mostrarLoginPassword");
+  prepararVisibilidadPassword("certificadoPassword", "mostrarCertificadoPassword");
+
   document.getElementById("certificadosBtn").addEventListener("click", function(){
     document.getElementById("certificadosOverlay").hidden = false;
     cargarCertificados();
     cargarEstadoProductos();
+  });
+  document.getElementById("perfilDisponible").addEventListener("change", function(){
+    var selector = this;
+    if(!selector.value) return;
+    selector.disabled = true;
+    apiFetch("/api/certificados-disponibles/seleccionar", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({perfil:selector.value})
+    }).then(function(r){
+      if(!r.ok) throw new Error(r.data.detail || "No se pudo seleccionar el certificado.");
+      asociacionesCache.clear();
+      restablecerDestino();
+      empresaActual = "";
+      try { localStorage.removeItem("empresaActual"); } catch(err){}
+      empresas = [];
+      limpiarTableros();
+      cargarPerfilActivo();
+      cargarParametrosEnvio();
+      return apiFetch("/api/empresas/asegurar", {method:"POST"}).then(function(actualizadas){
+        if(!actualizadas.ok) throw new Error(actualizadas.data.detail || "No se pudieron cargar las empresas del SII.");
+        return loadEmpresas();
+      });
+    }).catch(function(error){ showToast(error.message, true); cargarPerfilActivo(); })
+      .finally(function(){ selector.disabled = false; });
   });
   document.getElementById("sincronizarProductosBtn").addEventListener("click", sincronizarProductos);
   document.getElementById("certificadosCerrarBtn").addEventListener("click", cerrarCertificados);
@@ -1911,6 +2025,7 @@
       cargarPerfilActivo();
       document.getElementById("certificadoForm").reset();
       restablecerDestino();
+      cargarParametrosEnvio();
       empresaActual = "";
       try { localStorage.removeItem("empresaActual"); } catch(err){}
       empresas = [];

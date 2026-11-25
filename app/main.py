@@ -11,13 +11,15 @@ from sqlalchemy.orm import Session
 from typing import Literal
 
 from app.db import get_db, init_db
-from app.models import EmpresaPerfil, EmpresasPerfilEstado
+from app.models import EmpresaPerfil, EmpresasPerfilEstado, Usuario
 from app.version import __version__
 from app import auth
 from app.routers import documents
 from app.routers import productos as productos_router
 from app.routers import equivalencias as equivalencias_router
 from app import configuracion_sii
+from app import contexto_usuario
+from app import usuarios
 
 # Sin esto, lo que la app registra en el log no sale por ningún lado: uvicorn configura
 # sus propios loggers y deja el resto en WARNING sin handler. Costó un diagnóstico: un
@@ -42,14 +44,26 @@ app.add_middleware(
 app.include_router(documents.router)
 app.include_router(productos_router.router)
 app.include_router(equivalencias_router.router)
+app.include_router(usuarios.router)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.middleware("http")
+async def identidad_del_pedido(request: Request, siguiente):
+    principal = auth.sesion_valida(request.cookies.get(auth.COOKIE)) or auth.sesion_automatica(request)
+    token = contexto_usuario.establecer(principal)
+    try:
+        return await siguiente(request)
+    finally:
+        contexto_usuario.restaurar(token)
 
 
 @app.on_event("startup")
 def on_startup() -> None:
     configuracion_sii.restaurar_perfil_persistente()
     init_db()
+    auth.sembrar_administrador()
 
 
 class Credenciales(BaseModel):
@@ -84,19 +98,23 @@ class SolicitudRevelar(BaseModel):
 
 
 @app.post("/api/login")
-def login(datos: Credenciales, response: Response):
-    """Valida usuario y contraseña contra las variables de entorno del despliegue."""
+def login(datos: Credenciales, response: Response, request: Request):
+    """Valida una cuenta activa sin devolver información sobre usuarios inexistentes."""
+    auth._validar_origen(request)
     try:
-        if not auth.credenciales_validas(datos.usuario, datos.password):
+        principal = auth.autenticar(datos.usuario, datos.password)
+        if principal is None:
             raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
     except auth.ConfiguracionAuthError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    auth.emitir_cookie(response, datos.usuario)
-    return {"usuario": datos.usuario}
+    auth.emitir_cookie(response, principal)
+    response.headers["Cache-Control"] = "no-store"
+    return {"usuario": principal.email, "administrador": principal.administrador}
 
 
 @app.post("/api/logout")
-def logout(response: Response):
+def logout(response: Response, request: Request):
+    auth._validar_origen(request)
     auth.borrar_cookie(response)
     return {"ok": True}
 
@@ -110,12 +128,15 @@ def version():
 @app.get("/api/sesion")
 def sesion(request: Request, portal_sesion: str | None = Cookie(default=None)):
     """Le dice al portal si ya hay sesión, para mostrar la bandeja o el formulario."""
-    sin_login = auth.sesion_automatica(request) is not None
+    local = auth.sesion_automatica(request)
+    principal = auth.sesion_valida(portal_sesion) or local
     return {
-        "autenticado": sin_login or auth.sesion_valida(portal_sesion) is not None,
+        "autenticado": principal is not None,
         "configurada": auth.auth_configurada(),
+        "usuario": principal.email if principal else None,
+        "administrador": principal.administrador if principal else False,
         # El portal usa esto para no mostrar un "Salir" que no podría cerrar nada.
-        "sin_login": sin_login,
+        "sin_login": local is not None,
     }
 
 
@@ -124,34 +145,47 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/api/configuracion/sii", dependencies=[Depends(auth.requiere_sesion_gestion)])
+@app.get("/api/configuracion/sii", dependencies=[Depends(auth.requiere_administrador_gestion)])
 def estado_configuracion_sii(response: Response):
     response.headers["Cache-Control"] = "no-store"
     return configuracion_sii.estado()
 
 
-@app.post("/api/configuracion/sii", dependencies=[Depends(auth.requiere_sesion_gestion)])
-def guardar_configuracion_sii(datos: ConfiguracionSII, response: Response):
+@app.post("/api/configuracion/sii", dependencies=[Depends(auth.requiere_administrador_gestion)])
+def guardar_configuracion_sii(datos: ConfiguracionSII, response: Response,
+                             principal: contexto_usuario.Principal = Depends(auth.requiere_administrador_gestion),
+                             db: Session = Depends(get_db)):
     try:
         response.headers["Cache-Control"] = "no-store"
-        return configuracion_sii.guardar(datos.nombre, datos.rut, datos.password, datos.certificado_b64,
-                                         datos.client_id, datos.client_secret)
+        resultado = configuracion_sii.guardar(datos.nombre, datos.rut, datos.password, datos.certificado_b64,
+                                              datos.client_id, datos.client_secret)
+        if principal.id is not None and resultado.get("activo"):
+            usuario = db.get(Usuario, principal.id)
+            usuario.perfil_activo = resultado["activo"]
+            db.commit()
+        return resultado
     except configuracion_sii.CertificadoDuplicadoError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except configuracion_sii.ConfiguracionSIIError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.post("/api/configuracion/sii/seleccionar", dependencies=[Depends(auth.requiere_sesion_gestion)])
-def seleccionar_configuracion_sii(datos: SeleccionCertificado, response: Response):
+@app.post("/api/configuracion/sii/seleccionar", dependencies=[Depends(auth.requiere_administrador_gestion)])
+def seleccionar_configuracion_sii(datos: SeleccionCertificado, response: Response,
+                                  principal: contexto_usuario.Principal = Depends(auth.requiere_administrador_gestion),
+                                  db: Session = Depends(get_db)):
     try:
         response.headers["Cache-Control"] = "no-store"
-        return configuracion_sii.seleccionar(datos.perfil)
+        usuarios.seleccionar_certificado(usuarios.SeleccionPerfil(perfil=datos.perfil), principal, db)
+        estado = configuracion_sii.estado()
+        estado["activo"] = datos.perfil
+        estado["nombre_activo"] = configuracion_sii.detalle(datos.perfil)["nombre"]
+        return estado
     except configuracion_sii.ConfiguracionSIIError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.get("/api/configuracion/sii/{perfil}", dependencies=[Depends(auth.requiere_sesion_gestion)])
+@app.get("/api/configuracion/sii/{perfil}", dependencies=[Depends(auth.requiere_administrador_gestion)])
 def detalle_configuracion_sii(perfil: str, response: Response):
     try:
         response.headers["Cache-Control"] = "no-store"
@@ -160,7 +194,7 @@ def detalle_configuracion_sii(perfil: str, response: Response):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.post("/api/configuracion/sii/{perfil}/revelar", dependencies=[Depends(auth.requiere_sesion_gestion)])
+@app.post("/api/configuracion/sii/{perfil}/revelar", dependencies=[Depends(auth.requiere_administrador_gestion)])
 def revelar_configuracion_sii(perfil: str, datos: SolicitudRevelar, response: Response):
     try:
         response.headers["Cache-Control"] = "no-store"
@@ -170,7 +204,7 @@ def revelar_configuracion_sii(perfil: str, datos: SolicitudRevelar, response: Re
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.patch("/api/configuracion/sii/{perfil}", dependencies=[Depends(auth.requiere_sesion_gestion)])
+@app.patch("/api/configuracion/sii/{perfil}", dependencies=[Depends(auth.requiere_administrador_gestion)])
 def editar_configuracion_sii(
     perfil: str, datos: EdicionConfiguracionSII, response: Response,
     db: Session = Depends(get_db),
@@ -191,9 +225,14 @@ def editar_configuracion_sii(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@app.get("/configuracion", include_in_schema=False, dependencies=[Depends(auth.requiere_sesion_gestion)])
+@app.get("/configuracion", include_in_schema=False, dependencies=[Depends(auth.requiere_administrador_gestion)])
 def configuracion() -> FileResponse:
     return FileResponse(STATIC_DIR / "configuracion.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/usuarios", include_in_schema=False, dependencies=[Depends(auth.requiere_administrador_gestion)])
+def pagina_usuarios() -> FileResponse:
+    return FileResponse(STATIC_DIR / "usuarios.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/equivalencias", include_in_schema=False, dependencies=[Depends(auth.requiere_sesion_gestion)])

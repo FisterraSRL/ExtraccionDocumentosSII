@@ -1,5 +1,6 @@
 """La bandeja exige una confirmación antes de volver a habilitar un enviado."""
 import json
+from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
@@ -45,8 +46,12 @@ def test_habilitacion_visible_sin_envio_automatico():
     with sync_playwright() as playwright:
         navegador = playwright.chromium.launch(headless=True)
         pagina = navegador.new_page()
+        pagina.route("http://test.local/", lambda ruta: ruta.fulfill(
+            status=200, content_type="text/html",
+            body=(Path(__file__).parents[1] / "app" / "static" / "index.html").read_text(encoding="utf-8"),
+        ))
         pagina.route("**/api/**", responder)
-        pagina.goto("http://127.0.0.1:8000/")
+        pagina.goto("http://test.local/")
         pagina.get_by_label("Empresa a consultar").select_option("00000000-0")
         pagina.get_by_role("button", name="Sincronizar con SII").click()
         pagina.get_by_role("button", name="Habilitar reenvío").click()
@@ -95,8 +100,12 @@ def test_comprobante_externo_aparece_marcado_en_enviados():
     with sync_playwright() as playwright:
         navegador = playwright.chromium.launch(headless=True)
         pagina = navegador.new_page()
+        pagina.route("http://test.local/", lambda ruta: ruta.fulfill(
+            status=200, content_type="text/html",
+            body=(Path(__file__).parents[1] / "app" / "static" / "index.html").read_text(encoding="utf-8"),
+        ))
         pagina.route("**/api/**", responder)
-        pagina.goto("http://127.0.0.1:8000/")
+        pagina.goto("http://test.local/")
         pagina.get_by_label("Empresa a consultar").select_option("00000000-0")
         pagina.locator('[data-estado="enviado"]').click()
         assert pagina.get_by_text("Otro método").is_visible()

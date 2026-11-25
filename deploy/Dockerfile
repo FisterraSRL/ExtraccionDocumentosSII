@@ -18,4 +18,4 @@ COPY app/ ./app/
 
 USER 10001:10001
 EXPOSE 8000
-CMD ["sh", "-ec", ": \"${PORTAL_USUARIO:?Set PORTAL_USUARIO}\" \"${PORTAL_PASSWORD:?Set PORTAL_PASSWORD}\" \"${SECRET_KEY:?Set SECRET_KEY}\"; exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --no-proxy-headers --no-access-log"]
+CMD ["sh", "-ec", ": \"${SECRET_KEY:?Set SECRET_KEY}\"; exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --no-proxy-headers --no-access-log"]

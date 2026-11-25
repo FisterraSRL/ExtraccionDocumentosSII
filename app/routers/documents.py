@@ -15,9 +15,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import requiere_sesion
+from app import configuracion_sii, usuarios
 from app.db import get_db
 from app.finnegans.client import (
-    EMPRESA_CODIGO_PRUEBA,
     FinnegansClient,
     FinnegansAPIError,
     FinnegansConfigError,
@@ -100,6 +100,11 @@ def listar_documentos(
     db: Session = Depends(get_db),
 ):
     stmt = select(Documento)
+    ruts_perfil = _ruts_empresas_perfil(db)
+    if ruts_perfil is not None:
+        stmt = stmt.where(Documento.empresa_rut.in_(ruts_perfil))
+    elif usuarios.principal_actual().id is not None:
+        stmt = stmt.where(Documento.id == -1)
     if empresa:
         stmt = stmt.where(Documento.empresa_rut == empresa)
     if estado:
@@ -124,17 +129,26 @@ def listar_documentos(
 
 def _ruts_empresas_perfil(db: Session) -> list[str] | None:
     """None conserva la lista anterior hasta la primera consulta por perfil."""
-    perfil = settings.sii_perfil
+    try:
+        perfil = configuracion_sii.perfil_activo_id()
+    except configuracion_sii.ConfiguracionSIIError:
+        return [] if usuarios.principal_actual().id is not None else None
     if not perfil:
         return None
     if db.get(EmpresasPerfilEstado, perfil):
-        return list(db.execute(
-            select(EmpresaPerfil.empresa_rut).where(EmpresaPerfil.perfil_id == perfil)
-        ).scalars())
+        return usuarios.ruts_sii_permitidos(usuarios.principal_actual(), db, perfil)
     # Ya existe al menos un perfil consultado: uno nuevo no debe heredar sus empresas.
     if db.execute(select(EmpresasPerfilEstado.perfil_id).limit(1)).first():
         return []
-    return None
+    return [] if usuarios.principal_actual().id is not None else None
+
+
+def _exigir_documento_permitido(db: Session, documento: Documento) -> None:
+    ruts = _ruts_empresas_perfil(db)
+    if ruts is not None and documento.empresa_rut not in ruts:
+        raise HTTPException(status_code=403, detail="El documento no pertenece al certificado seleccionado.")
+    if ruts is None and usuarios.principal_actual().id is not None:
+        raise HTTPException(status_code=403, detail="Seleccioná un certificado antes de consultar documentos.")
 
 
 @router.get("/empresas", response_model=list[EmpresaOut])
@@ -158,9 +172,13 @@ def listar_empresas(db: Session = Depends(get_db)):
     )
     ruts_perfil = _ruts_empresas_perfil(db)
     autorizadas = set(ruts_perfil) if ruts_perfil is not None else None
+    try:
+        perfil_actual = configuracion_sii.perfil_activo_id()
+    except configuracion_sii.ConfiguracionSIIError:
+        perfil_actual = None
     portales_perfil = (
         {fila.empresa_rut: fila.en_portal_fe for fila in db.execute(
-            select(EmpresaPerfil).where(EmpresaPerfil.perfil_id == settings.sii_perfil)
+            select(EmpresaPerfil).where(EmpresaPerfil.perfil_id == perfil_actual)
         ).scalars()}
         if autorizadas is not None else {}
     )
@@ -192,6 +210,9 @@ def nombrar_empresa(rut: str, datos: EmpresaUpdate, db: Session = Depends(get_db
     empresa = db.get(Empresa, rut)
     if not empresa:
         raise HTTPException(status_code=404, detail=f"No hay una empresa con RUT {rut}.")
+    ruts_permitidos = _ruts_empresas_perfil(db)
+    if ruts_permitidos is not None and rut not in ruts_permitidos:
+        raise HTTPException(status_code=403, detail="La empresa no pertenece al certificado seleccionado.")
     empresa.nombre = datos.nombre.strip() or None
     db.commit()
     # Se devuelve la fila tal como la arma el listado, para no tener dos formas de
@@ -211,13 +232,12 @@ def refrescar_empresas(db: Session = Depends(get_db)):
     if motivo:
         raise HTTPException(status_code=501, detail=motivo)
     try:
-        rut, cert_path, password = settings.require_sii_credentials()
-    except RuntimeError as exc:
+        rut, cert_path, password, perfil_consultado = configuracion_sii.credenciales_sii_activas()
+    except configuracion_sii.ConfiguracionSIIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    perfil_consultado = settings.sii_perfil
 
     sii = _sii()
-    client = sii.SIIClient(rut, cert_path, password)
+    client = sii.SIIClient(rut, cert_path, password, perfil=perfil_consultado)
     try:
         session = client.abrir_sesion(headless=True)
         try:
@@ -238,7 +258,7 @@ def refrescar_empresas(db: Session = Depends(get_db)):
     finally:
         client.close()
 
-    if settings.sii_perfil != perfil_consultado:
+    if configuracion_sii.perfil_activo_id() != perfil_consultado:
         raise HTTPException(
             status_code=409,
             detail="El certificado activo cambió durante la consulta. Volvé a seleccionar el certificado.",
@@ -285,7 +305,11 @@ def refrescar_empresas(db: Session = Depends(get_db)):
 @router.post("/empresas/asegurar", response_model=list[EmpresaOut])
 def asegurar_empresas_perfil(db: Session = Depends(get_db)):
     """Carga el perfil nuevo desde el SII una vez; después reutiliza su lista guardada."""
-    if settings.sii_perfil and db.get(EmpresasPerfilEstado, settings.sii_perfil):
+    try:
+        perfil = configuracion_sii.perfil_activo_id()
+    except configuracion_sii.ConfiguracionSIIError:
+        perfil = None
+    if perfil and db.get(EmpresasPerfilEstado, perfil):
         return listar_empresas(db)
     return refrescar_empresas(db)
 
@@ -301,6 +325,7 @@ def ver_pdf(documento_id: int, db: Session = Depends(get_db)):
     documento = db.get(Documento, documento_id)
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    _exigir_documento_permitido(db, documento)
 
     contenido = documento.pdf_contenido
     if contenido is None:
@@ -337,12 +362,12 @@ def _traer_pdf_del_sii(db: Session, documento: Documento) -> bytes:
         )
 
     try:
-        rut, cert_path, password = settings.require_sii_credentials()
-    except RuntimeError as exc:
+        rut, cert_path, password, perfil = configuracion_sii.credenciales_sii_activas()
+    except configuracion_sii.ConfiguracionSIIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     sii = _sii()
-    client = sii.SIIClient(rut, cert_path, password)
+    client = sii.SIIClient(rut, cert_path, password, perfil=perfil)
     try:
         session = client.abrir_sesion(headless=True)
         page, context, browser, playwright = session
@@ -397,8 +422,8 @@ def sincronizar(
     if motivo:
         raise HTTPException(status_code=501, detail=motivo)
     try:
-        rut, cert_path, password = settings.require_sii_credentials()
-    except RuntimeError as exc:
+        rut, cert_path, password, perfil = configuracion_sii.credenciales_sii_activas()
+    except configuracion_sii.ConfiguracionSIIError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     periodos = [periodo] if periodo else _ultimos_periodos(meses)
@@ -406,7 +431,7 @@ def sincronizar(
 
     nuevos = actualizados = 0
     sii = _sii()
-    client = sii.SIIClient(rut, cert_path, password)
+    client = sii.SIIClient(rut, cert_path, password, perfil=perfil)
     try:
         # Un solo login para todas las empresas y períodos: el SII limita la frecuencia
         # de autenticaciones (ver AGENTS.md), así que la sesión se reusa a propósito.
@@ -432,8 +457,8 @@ def sincronizar(
                     from app.equivalencias import aplicar_confirmadas, registrar_documentos
                     db.flush()
                     registrar_documentos(db, rut_objetivo)
-                    if settings.sii_perfil:
-                        aplicar_confirmadas(db, settings.sii_perfil, rut_objetivo)
+                    if perfil:
+                        aplicar_confirmadas(db, perfil, rut_objetivo)
                 # Se confirma empresa por empresa: si el SII falla en la quinta, las
                 # cuatro anteriores ya quedaron guardadas en vez de perderse.
                 db.commit()
@@ -502,7 +527,11 @@ def _empresas_a_sincronizar(db: Session, empresa: str | None, rut_certificado: s
                 ),
             )
         return list(ruts)
-    return [empresa or rut_certificado.replace(".", "")]
+    elegido = empresa or rut_certificado.replace(".", "")
+    ruts = _ruts_empresas_perfil(db)
+    if ruts is not None and elegido not in ruts:
+        raise HTTPException(status_code=403, detail="No podés sincronizar una empresa ajena al certificado seleccionado.")
+    return [elegido]
 
 
 def _nombre_de(db: Session, rut: str) -> str:
@@ -757,7 +786,11 @@ def _cliente_finnegans(perfil_esperado: str | None = None) -> FinnegansClient:
 def _codigos_seleccionados(db: Session, documento: Documento,
                           perfil_id: str | None = None) -> dict[int, str]:
     """Usa las elecciones del mismo perfil que autentica contra Finnegans."""
-    perfil_id = perfil_id or settings.sii_perfil
+    if not perfil_id:
+        try:
+            perfil_id = configuracion_sii.perfil_activo_id()
+        except configuracion_sii.ConfiguracionSIIError:
+            perfil_id = None
     if not documento.items or not perfil_id:
         return {}
     from app.productos import _firma
@@ -785,7 +818,11 @@ def _codigos_seleccionados(db: Session, documento: Documento,
 
 def _centros_seleccionados(db: Session, documento: Documento,
                           perfil_id: str | None = None) -> dict[int, list[dict]]:
-    perfil_id = perfil_id or settings.sii_perfil
+    if not perfil_id:
+        try:
+            perfil_id = configuracion_sii.perfil_activo_id()
+        except configuracion_sii.ConfiguracionSIIError:
+            perfil_id = None
     if not documento.items or not perfil_id:
         return {}
     from app.productos import _firma
@@ -927,7 +964,7 @@ def _enviar(db: Session, documento: Documento, finnegans: FinnegansClient,
 
 @router.get("/finnegans/parametros-envio")
 def parametros_envio():
-    return {"empresa_codigo": EMPRESA_CODIGO_PRUEBA, "workflow_codigo": settings.finnegans_workflow or ""}
+    return {"empresa_codigo": "", "workflow_codigo": settings.finnegans_workflow or ""}
 
 
 @router.get("/documents/{documento_id}/finnegans")
@@ -942,6 +979,10 @@ def previsualizar_documento(documento_id: int, response: Response,
     documento = db.get(Documento, documento_id)
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    _exigir_documento_permitido(db, documento)
+    principal = usuarios.principal_actual()
+    perfil = usuarios.exigir_perfil(principal, db)
+    destino = usuarios.exigir_empresa(principal, db, perfil, empresa_codigo)
     finnegans = _cliente_finnegans()
     try:
         codigos = _codigos_seleccionados(db, documento, finnegans.perfil_id)
@@ -949,7 +990,7 @@ def previsualizar_documento(documento_id: int, response: Response,
         payload = finnegans.construir_payload(
             documento, codigos_por_indice=codigos,
             descuento_global=descuento,
-            empresa_codigo=empresa_codigo, workflow_codigo=workflow_codigo,
+            empresa_codigo=destino, workflow_codigo=workflow_codigo,
         )
         # El JSON depende de reglas y configuración que pueden cambiar sin que cambie
         # el id del documento. Una copia HTTP anterior no sirve para decidir un envío.
@@ -972,10 +1013,13 @@ def enviar_documento(documento_id: int, db: Session = Depends(get_db),
     documento = db.get(Documento, documento_id)
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    _exigir_documento_permitido(db, documento)
     if documento.estado == EstadoDocumento.ENVIADO:
         raise HTTPException(status_code=400, detail="Este documento ya fue enviado.")
-
-    return _enviar(db, documento, _cliente_finnegans(), empresa_codigo, workflow_codigo)
+    principal = usuarios.principal_actual()
+    perfil = usuarios.exigir_perfil(principal, db)
+    destino = usuarios.exigir_empresa(principal, db, perfil, empresa_codigo)
+    return _enviar(db, documento, _cliente_finnegans(), destino, workflow_codigo)
 
 
 @router.post("/documents/{documento_id}/habilitar-reenvio", response_model=DocumentoOut)
@@ -985,6 +1029,7 @@ def habilitar_reenvio(documento_id: int, confirmacion: ConfirmacionReenvio,
     documento = db.get(Documento, documento_id, with_for_update=True)
     if not documento:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    _exigir_documento_permitido(db, documento)
     if documento.estado != EstadoDocumento.ENVIADO:
         raise HTTPException(status_code=409, detail="Solo se puede habilitar el reenvío de un documento enviado.")
     if confirmacion.finnegans_id != documento.finnegans_id:
@@ -1035,6 +1080,13 @@ def enviar_seleccion(lote: EnviarLote, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Ninguno de esos documentos existe.")
 
     por_id = {d.id: d for d in documentos}
+    for documento in documentos:
+        _exigir_documento_permitido(db, documento)
+    principal = usuarios.principal_actual()
+    perfil = usuarios.exigir_perfil(principal, db)
+    if lote.perfil_esperado != perfil:
+        raise HTTPException(status_code=409, detail="Cambió el certificado activo. Revisá la vista previa antes de enviar.")
+    destino = usuarios.exigir_empresa(principal, db, perfil, lote.empresa_codigo)
     faltan = [i for i in lote.ids if i not in por_id]
     if faltan:
         log.warning("Se pidió enviar documentos inexistentes: %s", faltan)
@@ -1049,7 +1101,7 @@ def enviar_seleccion(lote: EnviarLote, db: Session = Depends(get_db)):
         if documento.estado == EstadoDocumento.ENVIADO:
             omitidos += 1
             continue
-        resultados.append(_enviar(db, documento, finnegans, lote.empresa_codigo, lote.workflow_codigo))
+        resultados.append(_enviar(db, documento, finnegans, destino, lote.workflow_codigo))
 
     enviados = sum(
         1 for r in resultados if r.estado == EstadoDocumento.ENVIADO

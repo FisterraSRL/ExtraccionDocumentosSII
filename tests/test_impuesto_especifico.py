@@ -83,7 +83,8 @@ def test_producto_asignado_habilita_el_payload_sin_generico():
     cliente = object.__new__(FinnegansClient)
     cliente.requiere_bien_uso = lambda codigo: False
     with patch("app.finnegans.client.settings", configuracion):
-        payload = cliente.construir_payload(_documento(), codigos_por_indice={0: "COMBUSTIBLE"})
+        payload = cliente.construir_payload(_documento(), empresa_codigo="EMPRESA_PRUEBA",
+                                            codigos_por_indice={0: "COMBUSTIBLE"})
     assert {linea["ProductoCodigo"] for linea in payload["Productos"]} == {"COMBUSTIBLE"}
 
 
@@ -185,8 +186,7 @@ def test_seleccion_de_producto_llega_a_la_vista_previa():
             assert modelo is ProductoFinnegans and clave == ("perfil_prueba", "COMBUSTIBLE_PRUEBA")
             return producto
 
-    with patch("app.routers.documents.settings", replace(settings, sii_perfil="perfil_prueba")):
-        codigos = _codigos_seleccionados(BasePrueba(), documento)
+    codigos = _codigos_seleccionados(BasePrueba(), documento, perfil_id="perfil_prueba")
     payload = _payload(documento, codigos)
     assert codigos == {0: "COMBUSTIBLE_PRUEBA"}
     assert [linea["ProductoCodigo"] for linea in payload["Productos"]] == [
@@ -355,11 +355,14 @@ def test_vista_previa_informa_el_ajuste_sin_alterar_el_json():
     cliente_prueba.requiere_bien_uso = lambda codigo: False
     with patch("app.finnegans.client.settings", configuracion_prueba), \
          patch("app.routers.documents._cliente_finnegans", return_value=cliente_prueba), \
+         patch("app.routers.documents._exigir_documento_permitido"), \
+         patch("app.routers.documents.usuarios.exigir_perfil", return_value="perfil-prueba"), \
+         patch("app.routers.documents.usuarios.exigir_empresa", return_value="EMPRESA_PRUEBA"), \
          patch("app.routers.documents._codigos_seleccionados", return_value={}), \
          patch("app.routers.documents._centros_seleccionados", return_value={}), \
          patch("app.routers.documents._productos_con_centro_requerido", return_value=set()), \
          patch("app.routers.documents._descuento_global", return_value=None):
-        payload = previsualizar_documento(1, respuesta, BasePrueba())
+        payload = previsualizar_documento(1, respuesta, BasePrueba(), empresa_codigo="EMPRESA_PRUEBA")
     assert respuesta.headers["X-Ajuste-Importe-Exento"] == "436"
     assert respuesta.headers["Cache-Control"] == "no-store"
     assert "X-Ajuste-Importe-Exento" not in payload

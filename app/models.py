@@ -139,6 +139,48 @@ class EmpresaPerfil(Base):
     en_portal_fe: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
+class Usuario(Base):
+    """Cuenta del portal; las contraseñas se guardan solo como hash lento."""
+
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    rol: Mapped[str] = mapped_column(String(20), nullable=False, default="usuario")
+    activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    version_sesion: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    perfil_activo: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    intentos_fallidos: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bloqueado_hasta: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    creado_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class UsuarioCertificado(Base):
+    __tablename__ = "usuarios_certificados"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), primary_key=True)
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    # Los permisos anteriores conservan acceso a todas las empresas del perfil.
+    empresas_sii_restringidas: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class UsuarioEmpresaSII(Base):
+    __tablename__ = "usuarios_empresas_sii"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), primary_key=True)
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    empresa_rut: Mapped[str] = mapped_column(String(12), primary_key=True)
+
+
+class UsuarioEmpresaFinnegans(Base):
+    __tablename__ = "usuarios_empresas_finnegans"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), primary_key=True)
+    perfil_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    empresa_codigo: Mapped[str] = mapped_column(String(80), primary_key=True)
+
+
 class Documento(Base):
     """Un documento traído del SII (RCV o BHE), con su detalle completo y su estado de envío."""
 

@@ -88,7 +88,7 @@ def test_token_de_cada_perfil_usa_su_id_y_secreto_sin_url():
         assert solicitud.get_header("Authorization") == "Basic " + secret
 
 
-def test_empresa_destino_de_pruebas_es_igual_en_vista_previa_y_envio():
+def test_empresa_destino_seleccionada_es_igual_en_vista_previa_y_envio():
     documento = Documento(
         empresa_rut="00000000-0", tipo="33", folio=123,
         proveedor_rut="11111111-1", proveedor_nombre="Prueba",
@@ -112,16 +112,16 @@ def test_empresa_destino_de_pruebas_es_igual_en_vista_previa_y_envio():
         settings, finnegans_workflow="FLUJO_PRUEBA", finnegans_producto="PRODUCTO_PRUEBA",
     )
     with patch("app.finnegans.client.settings", configuracion):
-        payload = cliente.construir_payload(documento)
-        resultado = cliente.send_document(documento)
+        payload = cliente.construir_payload(documento, empresa_codigo="EMPRESA_PERMITIDA")
+        resultado = cliente.send_document(documento, empresa_codigo="EMPRESA_PERMITIDA")
         codigos = {"empresa_codigo": "OTRA_EMPRESA", "workflow_codigo": "OTRO_FLUJO"}
         vista_editada = cliente.construir_payload(documento, **codigos)
         envio_editado = cliente.send_document(documento, **codigos)
-    assert payload["EmpresaCodigo"] == "PRUEBA39"
+    assert payload["EmpresaCodigo"] == "EMPRESA_PERMITIDA"
     assert resultado.ok
     assert len(enviados) == 2
     assert enviados[0][0:2] == ("POST", "facturaCompra")
-    assert enviados[0][2]["EmpresaCodigo"] == "PRUEBA39"
+    assert enviados[0][2]["EmpresaCodigo"] == "EMPRESA_PERMITIDA"
     assert envio_editado.ok
     assert vista_editada["EmpresaCodigo"] == "OTRA_EMPRESA"
     assert vista_editada["WorkflowCodigo"] == "OTRO_FLUJO"
@@ -135,16 +135,16 @@ def test_la_misma_empresa_puede_tener_codigo_distinto_en_dos_cuentas():
         cliente.catalogo = lambda ruta, codigo=codigo: [{"codigo": codigo}]
         cliente._autenticar = lambda: "token-prueba"
         cliente._pedir = lambda metodo, ruta, timeout=30: {
-            "Activo": True, "NumeroIdentificacion": "00000000-0",
+            "Activo": True, "CUIT": "00000000-0",
         }
         assert cliente.empresa_para_rut("00000000-0") == codigo
 
 
 def test_empresa_se_resuelve_una_vez_por_credenciales_y_conserva_el_codigo_menor():
     detalles = {
-        "empresaChile/1": {"Activo": False, "NumeroIdentificacion": "00000000-0"},
-        "empresaChile/2": {"Activo": True, "NumeroIdentificacion": "00000000-0"},
-        "empresaChile/9": {"Activo": True, "NumeroIdentificacion": "00000000-0"},
+        "empresaSucursal/1": {"Activo": False, "CUIT": "00000000-0"},
+        "empresaSucursal/2": {"Activo": True, "CUIT": "00000000-0"},
+        "empresaSucursal/9": {"Activo": True, "CUIT": "00000000-0"},
     }
     consultas = []
     primero = FinnegansClient("perfil-cache-prueba", "id-a", "clave-a")
@@ -162,7 +162,7 @@ def test_empresa_se_resuelve_una_vez_por_credenciales_y_conserva_el_codigo_menor
     otras_credenciales.catalogo = lambda _: [{"codigo": "OTRA"}]
     otras_credenciales._autenticar = lambda: "token-prueba"
     otras_credenciales._pedir = lambda metodo, ruta, timeout=30: {
-        "Activo": True, "NumeroIdentificacion": "00000000-0"
+        "Activo": True, "CUIT": "00000000-0"
     }
     assert otras_credenciales.empresa_para_rut("00000000-0") == "OTRA"
 
@@ -178,7 +178,7 @@ def test_un_cambio_de_perfil_corta_el_lote_antes_de_contactar_erp():
         )
         db.add(documento)
         db.commit()
-        with patch(
+        with patch("app.routers.documents.usuarios.exigir_perfil", return_value="perfil-b"), patch(
             "app.routers.documents._cliente_finnegans",
             side_effect=HTTPException(status_code=409, detail="Perfil cambiado"),
         ) as crear_cliente:
@@ -188,13 +188,13 @@ def test_un_cambio_de_perfil_corta_el_lote_antes_de_contactar_erp():
                 assert exc.status_code == 409
             else:
                 raise AssertionError("No debe iniciar el lote tras cambiar de certificado")
-            crear_cliente.assert_called_once_with("perfil-a")
+            crear_cliente.assert_not_called()
 
 
 if __name__ == "__main__":
     test_credenciales_salen_del_perfil_activo_y_detectan_cambio()
     test_token_de_cada_perfil_usa_su_id_y_secreto_sin_url()
-    test_empresa_destino_de_pruebas_es_igual_en_vista_previa_y_envio()
+    test_empresa_destino_seleccionada_es_igual_en_vista_previa_y_envio()
     test_la_misma_empresa_puede_tener_codigo_distinto_en_dos_cuentas()
     test_empresa_se_resuelve_una_vez_por_credenciales_y_conserva_el_codigo_menor()
     test_un_cambio_de_perfil_corta_el_lote_antes_de_contactar_erp()

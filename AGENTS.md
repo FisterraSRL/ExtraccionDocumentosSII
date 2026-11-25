@@ -4,7 +4,7 @@ Todo lo que hace falta para seguir trabajando en este repo sin haber visto las
 conversaciones anteriores. Leelo entero antes de tocar código: hay varias trampas que
 cuestan horas si se descubren solas, y están todas anotadas acá abajo.
 
-Última revisión: **09-oct-2026**. Si encontrás algo que ya no es cierto, corregilo en
+Última revisión: **25-nov-2026**. Si encontrás algo que ya no es cierto, corregilo en
 vez de dejarlo: este archivo solo sirve si se puede confiar en él.
 
 ---
@@ -393,12 +393,13 @@ URLs, logs o mensajes de error.
 
 - **Proveedor**: el código de proveedor **es el RUT con puntos** (`XX.XXX.XXX-X`).
   Nosotros lo guardamos sin puntos → `formatear_rut()`.
-- **Empresa**: `empresaChile/{codigo}` expone el RUT en `NumeroIdentificacion`, lo que
-  permite cruzarla automáticamente. Hay RUT con varios registros; se toma el activo de
-  código más bajo y se deja constancia en el log. `empresaChile/list` no trae el RUT:
-  en la instancia actual lista 208 empresas, por lo que sus detalles se consultan con
-  concurrencia acotada y el mapa se reutiliza diez minutos por perfil y credenciales.
-  La primera vista previa puede tardar alrededor de 40 segundos; no implica un envío.
+- **Empresa destino**: el selector y los permisos consultan `empresaSucursal/list`,
+  no `empresaChile/list`. `EmpresaCodigo` recibe el código de la sucursal seleccionada.
+  El listado trae código, nombre y estado activo; el detalle
+  `empresaSucursal/{codigo}` expone el RUT en `CUIT`. El resolvedor histórico por RUT
+  consulta esos detalles con concurrencia acotada y reutiliza el mapa diez minutos por
+  perfil y credenciales, pero la vista previa y el envío actuales usan la sucursal
+  elegida explícitamente.
 - **Tipo de documento**: lo identifica `TransaccionSubtipoCodigo` (FC, FCEX, NCCPRA…),
   ver `SUBTIPO_POR_TIPO_SII`. `TransaccionTipoCodigo` es siempre `OPER`.
 - **Moneda**: `PES`, no `CLP`. El catálogo tiene las dos; la instancia usa `PES`.
@@ -516,11 +517,10 @@ imputados. Si faltan, `construir_payload()` falla con un mensaje claro.
 | `FINNEGANS_MONEDA` | `PES` | |
 | `FINNEGANS_CONCEPTO_IVA` / `_EXENTO` | `COMPRA_IVA_19` / `ivacomexe` | |
 
-Durante el período de pruebas, **la vista previa y el envío usan `EmpresaCodigo:
-"PRUEBA39"` para todos los documentos**, por decisión explícita del usuario hasta que
-indique cambiarla. La constante está en `app/finnegans/client.py`. Las credenciales
-de API siguen siendo las del certificado activo; no se consulta el RUT del documento
-para elegir la empresa destino mientras rige esta decisión. Todas las líneas del
+La vista previa y el envío usan la empresa Finnegans que el usuario selecciona entre
+las permitidas para su certificado activo. El backend vuelve a verificar el permiso
+en cada solicitud; ya no hay un destino fijo de pruebas. Las credenciales de API
+siguen siendo las del certificado activo. Todas las líneas del
 JSON usan además `DIMCTC` con centro 5 al 100 %, aunque la cuenta no lo exija.
 Cuando la cuenta de compra de un producto incluye `DIMBU`, sus líneas agregan
 Bien de Uso `EPRUEB-001` al 100 % junto al centro de costo. La lectura de cuentas
@@ -531,7 +531,7 @@ El antiguo
 no lo borra en el ERP.
 
 Catálogos útiles, todos de solo lectura:
-`empresaChile`, `proveedor/list`, `producto/list`, `condicionPago/list`, `moneda/list`,
+`empresaSucursal/list`, `proveedor/list`, `producto/list`, `condicionPago/list`, `moneda/list`,
 `WorkflowEntidadAPI/list`. Los de `workflow/list`, `circuito/list` y
 `transaccionSubtipo/list` responden 501: no existen.
 
@@ -705,15 +705,30 @@ entorno.
 
 ### Acceso al portal
 
-`app/auth.py`: usuario y contraseña por variables de entorno (`PORTAL_USUARIO`,
-`PORTAL_PASSWORD`) y cookie firmada con HMAC sobre `SECRET_KEY`, 12 horas. No hay tabla
-de usuarios: es un portal interno.
+`app/auth.py`: usuarios en la base, contraseñas con PBKDF2-SHA256 y sal individual,
+y cookie firmada con HMAC sobre `SECRET_KEY`, 12 horas. El primer administrador se
+crea una sola vez a partir de `PORTAL_ADMIN_EMAIL` y `PORTAL_ADMIN_PASSWORD` del
+entorno privado. No poner esas credenciales en el repositorio. Los administradores
+crean otras cuentas en `/usuarios`. Cambiar permisos, contraseña, rol o estado revoca
+las sesiones anteriores de esa cuenta.
 
-- Si faltan esas variables el portal **no se abre**, en vez de quedar accesible.
+- Si no hay ninguna cuenta o falta `SECRET_KEY`, el portal **no se abre**, en vez de quedar accesible.
+- `usuarios_certificados`, `usuarios_empresas_sii` y `usuarios_empresas_finnegans`
+  limitan por certificado las empresas visibles en la bandeja y las sucursales destino
+  de cada usuario. La administración carga las empresas SII desde `empresas_perfil`
+  ya guardada, sin iniciar sesión en el SII. La selección se aplica también a
+  documentos, PDF, equivalencias y sincronización. Las asignaciones anteriores
+  conservan acceso a todas las empresas del perfil hasta que el administrador las
+  edite; las nuevas asignaciones guardan una lista explícita, que puede estar vacía.
+  Solo administradores acceden a Configuración y
+  Administración de usuarios; su acceso a certificados y empresas es total. La
+  selección activa es por usuario, no global. La bandeja, productos, equivalencias,
+  PDF, vista previa y envío deben verificar el perfil activo en el backend.
 - Todo el router de datos exige sesión. Públicos: `/api/version` y `/api/sesion`.
 - `PORTAL_COOKIE_INSEGURA=1` **solo** en desarrollo sobre `http://localhost`.
-- `GET /configuracion` permite configurar el certificado SII **solo desde loopback**
-  y con sesión del portal. Valida el `.pfx/.p12` y su contraseña localmente, guarda el
+- `GET /configuracion` exige administrador. Solo se sirve desde loopback, salvo cuando
+  el despliegue define `PORTAL_ADMIN_ORIGIN` con el origen HTTPS exacto. Valida el
+  `.pfx/.p12` y su contraseña localmente, guarda el
   archivo en `secrets/` y actualiza las variables SII de `.env` al activar un perfil,
   sin instalarlo en el almacén del navegador. No habilitar esta ruta fuera de la
   máquina que sincroniza.
@@ -723,17 +738,18 @@ de usuarios: es un portal interno.
   indicadores de campos configurados. El botón "Mostrar" permite consultar la contraseña
   del certificado, `Client_ID` o `Client_Secret` solo tras pulsarlo; al ocultar o cambiar
   de pestaña se borra de la vista. El token nunca se muestra. El acceso está protegido
-  por sesión y loopback; nunca registrar respuestas con secretos. Catálogo, validación
+  por sesión de administrador y control de origen; nunca registrar respuestas con secretos. Catálogo, validación
   de centros de costo, vista previa y envíos usan las credenciales del mismo perfil.
   La vista previa fija ese perfil en la confirmación; si cambia antes del envío, el
-  backend devuelve 409. `SIIClient` separa cookies y freno de login por `SII_PERFIL`;
+  backend devuelve 409. `SIIClient` separa cookies y freno de login por perfil;
   no reutilizar sesiones entre perfiles.
 - `PORTAL_SIN_LOGIN=1` saltea el login. Para desarrollo: reautenticarse cada 12 horas
   no protege nada cuando el portal escucha en la propia máquina. `sesion_automatica()`
   exige **las tres** condiciones y cada una tapa un agujero distinto: la variable
   activada, que el pedido venga de loopback (se mira `request.client.host`, el socket,
   no cabeceras que el cliente escribe) y que no estemos en serverless. Dejarla prendida
-  por error no abre el portal publicado. No la aflojes para "probar desde el celular":
+  por error no abre el portal publicado. Si `PORTAL_ADMIN_ORIGIN` está definido, el
+  bypass local también queda desactivado. No la aflojes para "probar desde el celular":
   la bandeja muestra documentos tributarios de clientes. Además, `requiere_sesion()`
   rechaza `Origin` de otro host y `Sec-Fetch-Site: cross-site`: una web ajena abierta
   en el mismo navegador no debe poder leer Client_Secret ni llamar al envío local.

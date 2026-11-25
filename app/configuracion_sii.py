@@ -129,6 +129,10 @@ def _exigir_vigencia(certificado) -> None:
 def estado() -> dict:
     datos = _leer_perfiles()
     activo = datos["activo"]
+    from app.contexto_usuario import actual
+    principal = actual()
+    if principal and principal.id is not None:
+        activo = principal.perfil_id
     perfil = datos["perfiles"].get(activo, {}) if activo else {}
     ruta = _archivo_perfil(perfil) if perfil else ARCHIVO_CERTIFICADO
     return {
@@ -164,7 +168,7 @@ def detalle(identificador: str) -> dict:
         "password_configurada": bool(perfil.get("password")),
         "client_id_configurado": bool(perfil.get("client_id")),
         "client_secret_configurado": bool(perfil.get("client_secret")),
-        "activo": datos.get("activo") == identificador,
+        "activo": estado()["activo"] == identificador,
         **_vigencia(perfil),
     }
 
@@ -188,8 +192,13 @@ def revelar(identificador: str, campo: str) -> str:
 
 
 def perfil_activo_id() -> str:
+    from app.contexto_usuario import actual
+
     datos = _leer_perfiles()
-    identificador = datos.get("activo")
+    principal = actual()
+    identificador = principal.perfil_id if principal and principal.id is not None else datos.get("activo")
+    if principal and principal.id is not None and not identificador:
+        raise ConfiguracionSIIError("Seleccioná un certificado permitido antes de continuar.")
     if not identificador or identificador not in datos["perfiles"]:
         raise ConfiguracionSIIError("Seleccioná un certificado SII en Configuración antes de continuar.")
     return identificador
@@ -198,7 +207,7 @@ def perfil_activo_id() -> str:
 def credenciales_finnegans_activas(perfil_esperado: str | None = None) -> tuple[str, str, str]:
     """Lee las credenciales del perfil activo solo para uso interno del backend."""
     datos = _leer_perfiles()
-    identificador = datos.get("activo")
+    identificador = perfil_activo_id()
     if not identificador or identificador not in datos["perfiles"]:
         raise ConfiguracionSIIError("Seleccioná un certificado SII en Configuración antes de continuar.")
     if perfil_esperado is not None and identificador != perfil_esperado:
@@ -213,6 +222,25 @@ def credenciales_finnegans_activas(perfil_esperado: str | None = None) -> tuple[
             "Completá Client_ID y Client_Secret del certificado activo en Configuración."
         )
     return identificador, client_id, client_secret
+
+
+def credenciales_finnegans_para_perfil(identificador: str) -> tuple[str, str, str]:
+    """Para el listado de empresas de administración, sin activar el perfil global."""
+    perfil = _leer_perfiles()["perfiles"].get(identificador)
+    if not perfil:
+        raise ConfiguracionSIIError("El certificado seleccionado no existe.")
+    if not perfil.get("client_id") or not perfil.get("client_secret"):
+        raise ConfiguracionSIIError("Completá Client_ID y Client_Secret de este certificado.")
+    return identificador, perfil["client_id"], perfil["client_secret"]
+
+
+def credenciales_sii_activas() -> tuple[str, Path, str, str]:
+    identificador = perfil_activo_id()
+    perfil = _leer_perfiles()["perfiles"][identificador]
+    ruta = _archivo_perfil(perfil)
+    if not ruta.is_file():
+        raise ConfiguracionSIIError("No se encontró el archivo del certificado seleccionado.")
+    return perfil["rut"], ruta, perfil["password"], identificador
 
 
 def _id_perfil(nombre: str, existentes: dict) -> str:
@@ -344,7 +372,10 @@ def guardar(nombre: str, rut: str, password: str, certificado_b64: str,
         Path(temporal).unlink(missing_ok=True)
         raise ConfiguracionSIIError("No se pudo guardar la configuración local.") from exc
 
-    return estado()
+    resultado = estado()
+    resultado["activo"] = identificador
+    resultado["nombre_activo"] = nombre_limpio
+    return resultado
 
 
 def editar(identificador: str, nombre: str, rut: str, password: str | None,

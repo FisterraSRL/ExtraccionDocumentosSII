@@ -16,9 +16,8 @@ ejemplo que el dueño del proyecto exportó desde el propio ERP:
 
 - **Proveedor**: el código de proveedor en Finnegans **es el RUT con puntos**
   ("XX.XXX.XXX-X"). Nosotros lo guardamos sin puntos, así que hay que formatearlo.
-- **Empresa**: `empresaChile/{codigo}` expone `NumeroIdentificacion` con el RUT, lo que
-  permite cruzar automáticamente la empresa del SII con la de Finnegans en vez de
-  mantener una tabla a mano.
+- **Empresa destino**: `empresaSucursal/list` devuelve los códigos de sucursal que
+  acepta `EmpresaCodigo`; el detalle `empresaSucursal/{codigo}` expone el RUT en `CUIT`.
 - **Tipo de documento**: lo identifica `TransaccionSubtipoCodigo` (FC, FCEX, NCCPRA…).
   El catálogo `comprobanteTipoImpositivo` sí tiene los códigos del SII chileno, pero en
   el documento real ese campo va en `null`, así que no se completa.
@@ -56,8 +55,6 @@ from app.models import Documento
 
 log = logging.getLogger(__name__)
 
-# Destino inicial de la bandeja y de los clientes que omiten el código de empresa.
-EMPRESA_CODIGO_PRUEBA = "PRUEBA39"
 CENTRO_COSTO_PRUEBA = "5"
 BIEN_USO_PRUEBA = "EPRUEB-001"
 
@@ -585,7 +582,7 @@ class FinnegansClient:
     def empresa_para_rut(self, rut_empresa: str) -> str:
         """Código de empresa en Finnegans a partir del RUT con que consultamos el SII.
 
-        Se resuelve contra `empresaChile`, que expone el RUT en `NumeroIdentificacion`.
+        Se resuelve contra `empresaSucursal`, que expone el RUT en `CUIT`.
         Hay RUT con más de un registro (la instancia tiene duplicados); se toma el
         activo de código más bajo, que es el original, y se deja constancia en el log.
         """
@@ -599,7 +596,7 @@ class FinnegansClient:
                 if anterior and anterior[0] > time.monotonic():
                     self._empresas_por_rut = anterior[1].copy()
             if self._empresas_por_rut is None:
-                empresas = self.catalogo("empresaChile")
+                empresas = self.catalogo("empresaSucursal")
                 # Obtener un solo token antes de abrir hilos evita autenticaciones
                 # simultáneas; cada petición individual usa ese mismo token.
                 self._autenticar()
@@ -609,7 +606,7 @@ class FinnegansClient:
                     if not codigo:
                         return "", None
                     detalle = self._pedir(
-                        "GET", f"empresaChile/{urllib.parse.quote(codigo)}", timeout=30
+                        "GET", f"empresaSucursal/{urllib.parse.quote(codigo)}", timeout=30
                     )
                     return codigo, detalle
 
@@ -621,7 +618,7 @@ class FinnegansClient:
                         if not isinstance(detalle, dict) or not detalle.get("Activo"):
                             continue
                         clave = re.sub(
-                            r"[^0-9kK]", "", str(detalle.get("NumeroIdentificacion") or "")
+                            r"[^0-9kK]", "", str(detalle.get("CUIT") or "")
                         ).upper()
                         if clave:
                             candidatos.setdefault(clave, []).append(codigo)
@@ -703,6 +700,8 @@ class FinnegansClient:
                 ". No se completan con valores por defecto porque elegirlos mal deja "
                 "asientos mal imputados en el ERP."
             )
+        if not empresa_codigo or not empresa_codigo.strip():
+            raise FinnegansConfigError("Seleccioná una empresa destino de Finnegans antes de generar el comprobante.")
 
         fecha = documento.fecha.isoformat() if isinstance(documento.fecha, date) else str(documento.fecha)
         neto = documento.neto or 0
@@ -714,7 +713,7 @@ class FinnegansClient:
             "IdentificacionExterna": identificacion,
             "Nombre": f"{subtipo} - {documento.folio}",
             "Descripcion": documento.proveedor_nombre[:200],
-            "EmpresaCodigo": empresa_codigo or EMPRESA_CODIGO_PRUEBA,
+            "EmpresaCodigo": empresa_codigo.strip(),
             "Fecha": fecha,
             "FechaComprobante": fecha,
             "Proveedor": formatear_rut(documento.proveedor_rut),

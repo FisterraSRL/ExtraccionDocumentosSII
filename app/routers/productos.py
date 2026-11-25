@@ -48,6 +48,8 @@ def consultar_centros_costo(
     documento = db.get(Documento, documento_id)
     if documento is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    from app.routers.documents import _exigir_documento_permitido
+    _exigir_documento_permitido(db, documento)
     respuesta = {}
     for indice, item in enumerate(documento.items or []):
         registro = db.get(DistribucionCentroCosto, (perfil_id, documento_id, indice))
@@ -65,6 +67,8 @@ def guardar_centros_costo(
     documento = db.get(Documento, documento_id)
     if documento is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    from app.routers.documents import _exigir_documento_permitido
+    _exigir_documento_permitido(db, documento)
     if not documento.items or not 0 <= indice < len(documento.items):
         raise HTTPException(status_code=422, detail="El ítem indicado no existe en el documento.")
     centros = [{"codigo": item.codigo.strip(), "porcentaje": item.porcentaje}
@@ -158,6 +162,8 @@ def preparar_productos(
     documento = db.get(Documento, documento_id)
     if documento is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    from app.routers.documents import _exigir_documento_permitido
+    _exigir_documento_permitido(db, documento)
     try:
         items = productos.preparar(db, perfil_id, documento)
     except productos.ErrorProductos as exc:
@@ -174,6 +180,8 @@ def elegir_producto(
     documento = db.get(Documento, documento_id)
     if documento is None:
         raise HTTPException(status_code=404, detail="Documento no encontrado.")
+    from app.routers.documents import _exigir_documento_permitido
+    _exigir_documento_permitido(db, documento)
     try:
         resultado = productos.guardar_asociacion(
             db, perfil_id, documento, indice, datos.codigo

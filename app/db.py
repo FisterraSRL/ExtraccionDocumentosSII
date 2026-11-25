@@ -76,6 +76,12 @@ def init_db() -> None:
                     conexion.execute(text(
                         f"ALTER TABLE {tabla} ADD COLUMN{condicion} {columna} VARCHAR(20)"
                     ))
+            existentes = {dato["name"] for dato in inspect(conexion).get_columns("usuarios_certificados")}
+            if "empresas_sii_restringidas" not in existentes:
+                conexion.execute(text(
+                    "ALTER TABLE usuarios_certificados ADD COLUMN empresas_sii_restringidas "
+                    "BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
 
         # Los intentos anteriores quedaron como error, aunque Finnegans confirmó
         # que el comprobante ya estaba registrado. Se reclasifican una sola vez.

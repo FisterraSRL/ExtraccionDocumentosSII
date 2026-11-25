@@ -1,5 +1,6 @@
 """Comprueba el flujo visible con datos sintéticos, sin tocar SII ni Finnegans."""
 import json
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -22,6 +23,10 @@ def test_seleccion_y_confirmacion():
     with sync_playwright() as playwright:
         navegador = playwright.chromium.launch(headless=True)
         pagina = navegador.new_page()
+        pagina.route("http://test.local/equivalencias", lambda ruta: ruta.fulfill(
+            status=200, content_type="text/html",
+            body=(Path(__file__).parents[1] / "app" / "static" / "equivalencias.html").read_text(encoding="utf-8"),
+        ))
         pagina.route("**/api/equivalencias?*", lambda ruta: ruta.fulfill(
             status=200, content_type="application/json",
             body=json.dumps({"total": 1 if "q=aceite" in ruta.request.url else 2,
@@ -38,7 +43,7 @@ def test_seleccion_y_confirmacion():
             status=200, content_type="application/json",
             body=json.dumps({"productos": [{"codigo": "P2", "nombre": "Cemento especial"}]}),
         ))
-        pagina.goto("http://127.0.0.1:8000/equivalencias")
+        pagina.goto("http://test.local/equivalencias")
         fila_visible = pagina.locator('tr[data-id="1"]')
         segunda = pagina.locator('tr[data-id="2"]')
         assert fila_visible.get_by_text("Cemento Portland 50 KG").is_visible()

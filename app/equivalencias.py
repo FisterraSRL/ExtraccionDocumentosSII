@@ -167,7 +167,8 @@ def equivalencia_para(db: Session, perfil_id: str, descripcion: str) -> tuple[bo
 
 
 def listar(db: Session, perfil_id: str, q: str = "", estado: str = "todos",
-           pagina: int = 1, limite: int = 50) -> dict:
+           pagina: int = 1, limite: int = 50,
+           ids_permitidos: set[int] | None = None) -> dict:
     if estado not in {"todos", "pendiente", "sugerido", "confirmado", "sin_equivalencia", "deshabilitado"}:
         raise ErrorEquivalencia("El filtro de estado no es válido.")
     pagina, limite = max(1, pagina), min(max(1, limite), 100)
@@ -192,6 +193,8 @@ def listar(db: Session, perfil_id: str, q: str = "", estado: str = "todos",
     consulta = select(ProductoSII).where(ProductoSII.apariciones > 0).order_by(
         ProductoSII.apariciones.desc(), ProductoSII.descripcion_normalizada
     )
+    if ids_permitidos is not None:
+        consulta = consulta.where(ProductoSII.id.in_(ids_permitidos))
     candidatas = []
     busqueda = normalizar(q)
     palabras_buscadas = _tokens(q) if busqueda else set()

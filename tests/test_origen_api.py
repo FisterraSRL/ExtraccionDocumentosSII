@@ -1,14 +1,14 @@
 """El modo local no revela credenciales a páginas de otro origen."""
 import os
-from http.cookies import SimpleCookie
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from fastapi import HTTPException, Response
+from fastapi import HTTPException
 
 from app import auth
 from app.auth import requiere_sesion
+from app.contexto_usuario import Principal
 
 
 def test_solo_el_origen_del_portal_puede_usar_la_api_protegida():
@@ -47,15 +47,13 @@ def test_gestion_remota_exige_host_configurado_y_cookie_firmada():
     def solicitud(**headers):
         return SimpleNamespace(headers={"host": host, **headers}, client=SimpleNamespace(host="127.0.0.1"))
 
-    with patch.dict(os.environ, {"PORTAL_ADMIN_ORIGIN": origen, "PORTAL_USUARIO": "test",
-                                 "PORTAL_PASSWORD": "test", "SECRET_KEY": "test-signing-key"}), patch.object(
-        auth, "sesion_automatica", return_value="local"
-    ):
-        response = Response()
-        auth.emitir_cookie(response, "test")
-        cookie = SimpleCookie(response.headers["set-cookie"])[auth.COOKIE].value
-        assert auth.requiere_sesion_gestion(solicitud(), cookie) == "test"
-        assert auth.requiere_sesion_gestion(solicitud(origin=origen), cookie) == "test"
+    principal = Principal(1, "admin@example.invalid", "administrador", None)
+    with patch.dict(os.environ, {"PORTAL_ADMIN_ORIGIN": origen}), patch.object(
+        auth, "sesion_automatica", return_value=None
+    ), patch.object(auth, "sesion_valida", side_effect=lambda cookie: principal if cookie == "firmada" else None):
+        cookie = "firmada"
+        assert auth.requiere_sesion_gestion(solicitud(), cookie) == principal
+        assert auth.requiere_sesion_gestion(solicitud(origin=origen), cookie) == principal
 
         with TestCase().assertRaises(HTTPException) as no_autorizado:
             auth.requiere_sesion_gestion(solicitud(), None)

@@ -204,7 +204,7 @@ def test_diferencia_sin_evidencia_no_hace_post():
         settings, finnegans_workflow="FLUJO_PRUEBA", finnegans_producto="ARTICULO_PRUEBA",
     )
     with patch("app.finnegans.client.settings", configuracion):
-        resultado = cliente.send_document(documento)
+        resultado = cliente.send_document(documento, empresa_codigo="EMPRESA_PRUEBA")
     assert resultado.ok is False
     assert "diferencia sin justificar" in resultado.error_detalle
     assert llamadas == []

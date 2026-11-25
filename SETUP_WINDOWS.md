@@ -41,7 +41,7 @@ playwright install chromium
 copy .env.example .env
 ```
 
-Además del SII, hay que definir el acceso al portal (`PORTAL_USUARIO`, `PORTAL_PASSWORD`, `SECRET_KEY`) y, mientras trabajes en `http://localhost`, `PORTAL_COOKIE_INSEGURA=1` para que la cookie de sesión viaje sin HTTPS.
+Además del SII, hay que definir el administrador inicial del portal (`PORTAL_ADMIN_EMAIL`, `PORTAL_ADMIN_PASSWORD`, `SECRET_KEY`) en el entorno privado. La cuenta se crea una sola vez en la base; después podés retirar las dos variables del administrador y seguir administrando cuentas desde `/usuarios`. Conservá `SECRET_KEY` estable. Mientras trabajes en `http://localhost`, usá `PORTAL_COOKIE_INSEGURA=1` para que la cookie de sesión viaje sin HTTPS.
 
 Editá `.env` con un editor de texto y completá:
 

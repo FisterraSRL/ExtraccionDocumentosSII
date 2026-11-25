@@ -216,8 +216,8 @@ with subprocess.Popen((sys.executable, "-m", "uvicorn", "app.main:app", "--host"
 def scratch_schema(image, version=""):
     return run("docker", "run", "--rm", "--network", "none",
                "-e", "DATABASE_URL=sqlite:////tmp/sii-deploy-smoke.db",
-               "-e", "PORTAL_USUARIO=fixture",
-               "-e", "PORTAL_PASSWORD=fixture_only",
+               "-e", "PORTAL_ADMIN_EMAIL=fixture@example.invalid",
+               "-e", "PORTAL_ADMIN_PASSWORD=disposable-test-password",
                "-e", "SECRET_KEY=disposable-test-key",
                "-e", "PORTAL_SIN_LOGIN=0",
                "--entrypoint", "python", image, "-c", SMOKE, version, timeout=50)

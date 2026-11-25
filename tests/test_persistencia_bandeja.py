@@ -1,5 +1,6 @@
 """La navegación recupera documentos guardados sin volver a consultar al SII."""
 import json
+from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
@@ -48,8 +49,17 @@ def test_bandeja_recupera_documentos_al_volver_de_equivalencias():
     with sync_playwright() as playwright:
         navegador = playwright.chromium.launch(headless=True)
         pagina = navegador.new_page()
+        estaticos = Path(__file__).parents[1] / "app" / "static"
+        pagina.route("http://test.local/", lambda ruta: ruta.fulfill(
+            status=200, content_type="text/html",
+            body=(estaticos / "index.html").read_text(encoding="utf-8"),
+        ))
+        pagina.route("http://test.local/equivalencias", lambda ruta: ruta.fulfill(
+            status=200, content_type="text/html",
+            body=(estaticos / "equivalencias.html").read_text(encoding="utf-8"),
+        ))
         pagina.route("**/api/**", responder)
-        pagina.goto("http://127.0.0.1:8000/")
+        pagina.goto("http://test.local/")
         pagina.evaluate("localStorage.setItem('empresaActual', '00000000-0')")
         pagina.reload()
         pagina.locator('[data-row="7"]').wait_for()
@@ -57,8 +67,8 @@ def test_bandeja_recupera_documentos_al_volver_de_equivalencias():
         pagina.locator('[data-action="toggle"][data-id="7"]').click()
         pagina.get_by_role("button", name="Producto Finnegans del ítem 1: Producto guardado").wait_for()
 
-        pagina.goto("http://127.0.0.1:8000/equivalencias")
-        pagina.goto("http://127.0.0.1:8000/")
+        pagina.goto("http://test.local/equivalencias")
+        pagina.goto("http://test.local/")
         pagina.locator('[data-row="7"]').wait_for()
         assert pagina.locator("#kpiTotalCount").inner_text() == "1"
         pagina.locator('[data-action="toggle"][data-id="7"]').click()

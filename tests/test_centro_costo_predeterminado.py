@@ -71,7 +71,8 @@ def test_payload_agrega_dimensiones_a_cada_linea_segun_producto():
     )
     with patch("app.finnegans.client.settings", configuracion):
         payload = cliente.construir_payload(
-            documento, codigos_por_indice={0: "BIEN_USO", 1: "SIN_CENTRO"},
+            documento, empresa_codigo="EMPRESA_PRUEBA",
+            codigos_por_indice={0: "BIEN_USO", 1: "SIN_CENTRO"},
         )
     productos = payload["Productos"]
     assert len(productos) == 3
