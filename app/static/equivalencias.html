@@ -73,4 +73,4 @@ $('filas').addEventListener('click',evento=>{const boton=evento.target.closest('
   else marcar(id,accion);
 });
 let temporizadorFiltro=0;$('filtro').oninput=()=>{clearTimeout(temporizadorFiltro);temporizadorFiltro=setTimeout(()=>{pagina=1;cargar()},250)};$('estado').onchange=()=>{pagina=1;cargar()};$('anterior').onclick=()=>{pagina--;cargar()};$('siguiente').onclick=()=>{pagina++;cargar()};$('guardarTodo').onclick=guardarTodo;$('descartar').onclick=()=>{pendientes.clear();dibujar();aviso('Cambios sin guardar descartados.')};window.addEventListener('beforeunload',evento=>{if(pendientes.size){evento.preventDefault();evento.returnValue=''}});cargar();
-</script></body></html>
+</script><script src="/selectores-buscables.js" defer></script></body></html>

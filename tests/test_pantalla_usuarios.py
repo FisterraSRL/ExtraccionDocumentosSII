@@ -60,6 +60,9 @@ def test_crear_y_editar_usuario_con_permisos():
         pagina.locator(".perfil-check").check()
         pagina.locator('.empresas-sii input[value="11111111-1"]').check()
         pagina.locator('.empresas-finnegans input[value="EMPRESA-A"]').check()
+        pagina.get_by_role("searchbox", name="Buscar en Sucursales Finnegans para el envío").fill("Empresa B")
+        assert pagina.locator('.empresas-finnegans input[value="EMPRESA-A"]').is_hidden()
+        assert pagina.locator('.empresas-finnegans input[value="EMPRESA-B"]').is_visible()
         pagina.locator("#guardar").click()
         pagina.get_by_text("Usuario guardado.").wait_for()
         assert guardados == [{

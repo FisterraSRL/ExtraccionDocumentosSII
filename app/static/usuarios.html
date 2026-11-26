@@ -19,19 +19,20 @@
     .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.check{display:flex;gap:9px;align-items:center;font-size:.9rem}.check input{width:18px;height:18px}
     .note{color:#657788;font-size:.86rem;line-height:1.5}.error{color:#9b2730;background:#ffe9e9;padding:11px;border-radius:8px}.success{color:#1d6948;background:#e6f5ee;padding:11px;border-radius:8px}
     .cert{border:1px solid #cbd4dc;border-radius:12px;padding:14px;margin:10px 0;background:#fafbfc}.catalogo{margin-top:14px}.catalogo h3{font-size:.92rem;margin:0 0 7px}.companies{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:7px;max-height:210px;overflow:auto}.companies .check{align-items:flex-start;font-size:.81rem}.muted{opacity:.55}
+    .buscar-lista{width:100%;padding:9px 10px;border:1px solid #aebbc7;border-radius:8px;background:#fff;color:#0a2f43;font:inherit}.catalogo .buscar-lista{margin:0 0 8px}.list .item[hidden],.cert[hidden],.companies .check[hidden]{display:none!important}
     @media(max-width:760px){.layout{grid-template-columns:1fr}.row{grid-template-columns:1fr}}
   </style>
 </head>
 <body><main>
   <header><h1>Administración de usuarios</h1><a href="/">Volver a la bandeja</a></header>
   <div class="layout">
-    <section class="card"><h2>Usuarios</h2><button class="primary" id="nuevo" type="button">+ Nuevo usuario</button><div class="list" id="lista"></div></section>
+    <section class="card"><h2>Usuarios</h2><button class="primary" id="nuevo" type="button">+ Nuevo usuario</button><input class="buscar-lista" id="buscarUsuarios" type="search" placeholder="Buscar usuario" aria-label="Buscar usuarios"><div class="list" id="lista"></div></section>
     <section class="card"><h2 id="titulo">Nuevo usuario</h2>
       <form id="form">
         <div class="row"><label class="field">Correo electrónico<input id="email" type="email" required autocomplete="off"></label><label class="field">Rol<select id="rol"><option value="usuario">Usuario</option><option value="administrador">Administrador</option></select></label></div>
         <div class="field"><label for="password">Contraseña</label><div class="password-control"><input id="password" type="password" minlength="12" autocomplete="new-password"><button id="mostrarPassword" type="button" aria-controls="password" aria-pressed="false">Mostrar</button></div><span class="note" id="passwordAyuda">Al menos 12 caracteres.</span></div>
         <label class="check"><input id="activo" type="checkbox" checked> Cuenta activa</label>
-        <div><h2>Certificados y empresas</h2><p class="note">Por cada certificado, elegí las empresas del SII que aparecerán en la bandeja y las sucursales Finnegans a las que podrá enviar. Los administradores tienen acceso total.</p><div id="certificados"></div></div>
+        <div><h2>Certificados y empresas</h2><p class="note">Por cada certificado, elegí las empresas del SII que aparecerán en la bandeja y las sucursales Finnegans a las que podrá enviar. Los administradores tienen acceso total.</p><input class="buscar-lista" id="buscarCertificados" type="search" placeholder="Buscar certificado" aria-label="Buscar certificados"><div id="certificados"></div></div>
         <div id="mensaje" role="status" hidden></div>
         <div><button class="primary" id="guardar" type="submit">Guardar usuario</button></div>
       </form>
@@ -50,6 +51,9 @@ async function api(ruta, opciones){
 }
 function mensaje(texto,error){var nodo=$("mensaje");nodo.hidden=!texto;nodo.className=error?"error":"success";nodo.textContent=texto||""}
 function seleccionActual(){return usuarios.find(function(u){return u.id===seleccionado})}
+function coincide(texto,consulta){return texto.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().includes(consulta.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim())}
+function filtrarUsuarios(){var q=$("buscarUsuarios").value;document.querySelectorAll("#lista .item").forEach(function(b){b.hidden=!coincide(b.textContent,q)})}
+function filtrarCertificados(){var q=$("buscarCertificados").value;document.querySelectorAll("#certificados .cert").forEach(function(c){c.hidden=!coincide(c.querySelector(".perfil-check").parentElement.textContent,q)})}
 function pintarLista(){
   $("lista").replaceChildren();
   usuarios.forEach(function(u){
@@ -58,6 +62,7 @@ function pintarLista(){
     var nota=document.createElement("small");nota.textContent=(u.rol==="administrador"?"Administrador":"Usuario")+(u.activo?"":" · Inactivo");boton.appendChild(nota);
     boton.addEventListener("click",function(){seleccionado=u.id;pintar()});$("lista").appendChild(boton);
   });
+  filtrarUsuarios();
 }
 function pintarOpciones(contenedor,filas,clave,seleccionadas){
   contenedor.replaceChildren();contenedor.classList.remove("error");
@@ -66,6 +71,8 @@ function pintarOpciones(contenedor,filas,clave,seleccionadas){
     var casilla=document.createElement("input");casilla.type="checkbox";casilla.value=empresa[clave];casilla.checked=seleccionadas.includes(empresa[clave]);
     etiqueta.append(casilla,document.createTextNode(empresa.nombre+" · "+empresa[clave]));contenedor.appendChild(etiqueta);
   });
+  var buscador=contenedor.closest(".catalogo")?.querySelector(".buscar-lista");
+  if(buscador)buscador.dispatchEvent(new Event("input"));
 }
 async function cargarCatalogos(perfil,caja,asignado){
   var sii=caja.querySelector(".empresas-sii"), finnegans=caja.querySelector(".empresas-finnegans");
@@ -99,8 +106,13 @@ function pintarCertificados(){
     [["Empresas SII para la bandeja","empresas-sii"],["Sucursales Finnegans para el envío","empresas-finnegans"]].forEach(function(datos){
       var grupo=document.createElement("div");grupo.className="catalogo";
       var titulo=document.createElement("h3");titulo.textContent=datos[0];
+      var buscador=document.createElement("input");buscador.type="search";buscador.className="buscar-lista";
+      buscador.placeholder="Buscar empresa, RUT o código";buscador.setAttribute("aria-label","Buscar en "+datos[0]);
       var empresas=document.createElement("div");empresas.className="companies "+datos[1];
-      grupo.append(titulo,empresas);grupos.appendChild(grupo);
+      buscador.addEventListener("input",function(){
+        empresas.querySelectorAll(".check").forEach(function(opcion){opcion.hidden=!coincide(opcion.textContent,buscador.value)});
+      });
+      grupo.append(titulo,buscador,empresas);grupos.appendChild(grupo);
     });
     caja.appendChild(grupos);
     casilla.addEventListener("change",function(){grupos.hidden=!casilla.checked;if(casilla.checked&&caja.dataset.catalogosListos!=="1")cargarCatalogos(perfil.id,caja,null)});
@@ -108,6 +120,7 @@ function pintarCertificados(){
     if(asignado)cargarCatalogos(perfil.id,caja,asignado);
   });
   if(!perfiles.length)raiz.textContent="Primero cargá certificados en Configuración.";
+  filtrarCertificados();
 }
 function pintar(){
   var u=seleccionActual();pintarLista();$("titulo").textContent=u?"Editar usuario":"Nuevo usuario";
@@ -117,6 +130,8 @@ function pintar(){
   mensaje("");pintarCertificados();
 }
 $("nuevo").addEventListener("click",function(){seleccionado=null;pintar()});
+$("buscarUsuarios").addEventListener("input",filtrarUsuarios);
+$("buscarCertificados").addEventListener("input",filtrarCertificados);
 $("mostrarPassword").addEventListener("click",function(){
   var visible=$("password").type==="password";$("password").type=visible?"text":"password";
   this.textContent=visible?"Ocultar":"Mostrar";this.setAttribute("aria-pressed",visible?"true":"false");
@@ -146,4 +161,4 @@ $("form").addEventListener("submit",async function(event){
 Promise.all([api("/api/administracion/usuarios"),api("/api/certificados-disponibles")]).then(function(resultados){
   usuarios=resultados[0];perfiles=resultados[1].perfiles;pintar();
 }).catch(function(error){mensaje(error.message,true)});
-</script></body></html>
+</script><script src="/selectores-buscables.js" defer></script></body></html>

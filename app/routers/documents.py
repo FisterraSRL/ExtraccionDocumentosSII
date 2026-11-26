@@ -15,7 +15,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.auth import requiere_sesion
-from app import configuracion_sii, usuarios
+from app import configuracion_sii, limpieza_certificados, usuarios
 from app.db import get_db
 from app.finnegans.client import (
     FinnegansClient,
@@ -222,6 +222,21 @@ def nombrar_empresa(rut: str, datos: EmpresaUpdate, db: Session = Depends(get_db
 
 @router.post("/empresas/refrescar", response_model=list[EmpresaOut])
 def refrescar_empresas(db: Session = Depends(get_db)):
+    try:
+        perfil = configuracion_sii.perfil_activo_id()
+    except configuracion_sii.ConfiguracionSIIError:
+        return _refrescar_empresas(db)
+    try:
+        candado = limpieza_certificados.tomar_bloqueo(perfil)
+    except limpieza_certificados.OperacionPerfilEnCurso as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        return _refrescar_empresas(db)
+    finally:
+        candado.release()
+
+
+def _refrescar_empresas(db: Session):
     """Trae del SII la lista de empresas que este certificado puede consultar.
 
     Las que el SII ya no lista se marcan `autorizada=False` en vez de borrarse, para no
@@ -433,6 +448,10 @@ def sincronizar(
     sii = _sii()
     client = sii.SIIClient(rut, cert_path, password, perfil=perfil)
     try:
+        candado_perfil = limpieza_certificados.tomar_bloqueo(perfil)
+    except limpieza_certificados.OperacionPerfilEnCurso as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
         # Un solo login para todas las empresas y períodos: el SII limita la frecuencia
         # de autenticaciones (ver AGENTS.md), así que la sesión se reusa a propósito.
         session = client.abrir_sesion(headless=True)
@@ -491,7 +510,10 @@ def sincronizar(
                     "volvé a sincronizar para continuar."),
         ) from exc
     finally:
-        client.close()
+        try:
+            client.close()
+        finally:
+            candado_perfil.release()
 
     filtro = select(func.count()).select_from(Documento)
     if len(objetivos) == 1:
@@ -1019,7 +1041,14 @@ def enviar_documento(documento_id: int, db: Session = Depends(get_db),
     principal = usuarios.principal_actual()
     perfil = usuarios.exigir_perfil(principal, db)
     destino = usuarios.exigir_empresa(principal, db, perfil, empresa_codigo)
-    return _enviar(db, documento, _cliente_finnegans(), destino, workflow_codigo)
+    try:
+        candado = limpieza_certificados.tomar_bloqueo(perfil)
+    except limpieza_certificados.OperacionPerfilEnCurso as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        return _enviar(db, documento, _cliente_finnegans(), destino, workflow_codigo)
+    finally:
+        candado.release()
 
 
 @router.post("/documents/{documento_id}/habilitar-reenvio", response_model=DocumentoOut)
@@ -1091,6 +1120,18 @@ def enviar_seleccion(lote: EnviarLote, db: Session = Depends(get_db)):
     if faltan:
         log.warning("Se pidió enviar documentos inexistentes: %s", faltan)
 
+    try:
+        candado = limpieza_certificados.tomar_bloqueo(perfil)
+    except limpieza_certificados.OperacionPerfilEnCurso as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        return _enviar_seleccion_bajo_bloqueo(lote, db, por_id, destino)
+    finally:
+        candado.release()
+
+
+def _enviar_seleccion_bajo_bloqueo(lote: EnviarLote, db: Session,
+                                  por_id: dict[int, Documento], destino: str) -> EnvioLoteResult:
     finnegans = _cliente_finnegans(lote.perfil_esperado)
     resultados: list[EnviarResult] = []
     omitidos = 0

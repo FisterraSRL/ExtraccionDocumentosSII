@@ -149,6 +149,7 @@
   .sincronizacion-fila{display:flex;align-items:center;gap:14px;flex-wrap:wrap;min-height:42px;}
   .parametros-envio{border-top:1px solid rgba(10,47,67,.12);padding-top:16px;}
   .empresa-meta{color:#5b6b75;font-size:.84rem;}
+  .sugerencia-etiqueta{color:#286b55;font-size:.72rem;font-weight:700;white-space:nowrap;}
   .empresa-aviso{padding:9px 12px;border-radius:9px;
     font-size:.82rem; background:#eef4f8; border:1px solid #c5d8e4; color:#28536b;}
   .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
@@ -495,7 +496,7 @@
         </div>
         <div class="empresa-aviso" id="empresaAviso" hidden></div>
         <div class="parametros-envio">
-          <div class="campo-bandeja"><div class="campo-encabezado"><label for="empresaDestino">Empresa destino Finnegans</label></div><select id="empresaDestino" required><option value="">Seleccioná una empresa permitida</option></select></div>
+          <div class="campo-bandeja"><div class="campo-encabezado"><label for="empresaDestino">Empresa destino Finnegans</label><span class="sugerencia-etiqueta" id="empresaDestinoSugerencia" hidden>Sugerida</span></div><select id="empresaDestino" required><option value="">Seleccioná una empresa permitida</option></select></div>
           <div class="campo-bandeja"><div class="campo-encabezado"><label for="workflowCodigo">Workflow</label></div><input id="workflowCodigo" type="text" required autocomplete="off" spellcheck="false"></div>
         </div>
       </div>
@@ -705,6 +706,9 @@
   var destinoConfirmado = null;
   var empresaDestino = document.getElementById("empresaDestino");
   var consultaDestinos = 0;
+  var destinosPermitidos = [];
+  var consultaSugerencia = 0;
+  var destinoManual = false;
   var workflowCodigo = document.getElementById("workflowCodigo");
   var consultaConfirmacion = null;
 
@@ -954,6 +958,7 @@
       }
       renderEmpresas();
       actualizarBotonSync();
+      sugerirDestino();
     });
   }
 
@@ -1465,9 +1470,78 @@
 
   // ---------- Envío a Finnegans ----------
 
+  function normalizarRut(valor){
+    return (valor || "").toUpperCase().replace(/[^0-9K]/g, "");
+  }
+
+  function normalizarNombre(valor){
+    return (valor || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  function unica(candidatas){
+    return candidatas.length === 1 ? candidatas[0] : null;
+  }
+
+  function sugerenciaLocal(empresa){
+    var rut = normalizarRut(empresa.rut);
+    var nombre = normalizarNombre(empresa.nombre || empresa.nombre_mostrado);
+    var porRut = unica(destinosPermitidos.filter(function(destino){
+      return destino.rut && normalizarRut(destino.rut) === rut;
+    }));
+    if(porRut) return porRut;
+    var porCodigo = unica(destinosPermitidos.filter(function(destino){
+      var codigo = normalizarNombre(destino.codigo);
+      return codigo && (codigo === rut || codigo === nombre ||
+        (codigo.length >= 5 && nombre.startsWith(codigo)));
+    }));
+    if(porCodigo) return porCodigo;
+    var porNombre = unica(destinosPermitidos.filter(function(destino){
+      return nombre && normalizarNombre(destino.nombre) === nombre;
+    }));
+    if(porNombre) return porNombre;
+    return unica(destinosPermitidos.filter(function(destino){
+      var descripcion = normalizarNombre(destino.nombre);
+      var corta = Math.min(nombre.length, descripcion.length);
+      var larga = Math.max(nombre.length, descripcion.length);
+      return corta >= 8 && corta / larga >= .72 &&
+        (nombre.includes(descripcion) || descripcion.includes(nombre));
+    }));
+  }
+
+  function seleccionarDestinoSugerido(codigo){
+    empresaDestino.value = codigo;
+    empresaDestino.dataset.sugeridaPara = empresaActual;
+    document.getElementById("empresaDestinoSugerencia").hidden = false;
+    cerrarConfirmacion();
+  }
+
+  function sugerirDestino(){
+    if(!empresaActual || !destinosPermitidos.length || destinoManual ||
+       empresaDestino.dataset.sugeridaPara === empresaActual) return;
+    var origen = empresas.find(function(e){ return e.rut === empresaActual; });
+    if(!origen) return;
+    var consulta = ++consultaSugerencia;
+    var sugerida = sugerenciaLocal(origen);
+    if(sugerida) seleccionarDestinoSugerido(sugerida.codigo);
+    apiFetch("/api/finnegans/sugerencia-empresa?empresa_rut=" + encodeURIComponent(empresaActual),
+             {cache:"no-store"}).then(function(r){
+      if(consulta !== consultaSugerencia || origen.rut !== empresaActual || destinoManual || !r.ok) return;
+      var codigo = r.data.codigo;
+      if(codigo && destinosPermitidos.some(function(e){ return e.codigo === codigo; })){
+        seleccionarDestinoSugerido(codigo);
+      }
+    }).catch(function(){ /* La selección manual sigue disponible. */ });
+  }
+
   function cargarParametrosEnvio(){
     var consulta = ++consultaDestinos;
     var anterior = empresaDestino.value;
+    consultaSugerencia++;
+    destinosPermitidos = [];
+    delete empresaDestino.dataset.sugeridaPara;
+    document.getElementById("empresaDestinoSugerencia").hidden = true;
+    empresaDestino.disabled = true;
     return Promise.all([
       apiFetch("/api/finnegans/parametros-envio", {cache:"no-store"}),
       apiFetch("/api/finnegans/empresas-permitidas", {cache:"no-store"})
@@ -1483,21 +1557,28 @@
       inicial.textContent = "Seleccioná una empresa permitida";
       empresaDestino.appendChild(inicial);
       if(!permitidas.ok) throw new Error(permitidas.data.detail || "No se pudieron consultar las empresas permitidas.");
-      (permitidas.data.empresas || []).forEach(function(empresa){
+      destinosPermitidos = permitidas.data.empresas || [];
+      destinosPermitidos.forEach(function(empresa){
         var opcion = document.createElement("option");
         opcion.value = empresa.codigo;
         opcion.textContent = empresa.nombre + " · " + empresa.codigo;
         empresaDestino.appendChild(opcion);
       });
       empresaDestino.value = Array.from(empresaDestino.options).some(function(o){ return o.value === anterior; }) ? anterior : "";
-      if(!permitidas.data.empresas.length) showToast("No hay empresas Finnegans permitidas para este certificado.", true);
+      empresaDestino.disabled = false;
+      if(!destinosPermitidos.length) showToast("No hay empresas Finnegans permitidas para este certificado.", true);
+      sugerirDestino();
     }).catch(function(error){
       if(consulta === consultaDestinos) showToast(error.message || "No se pudieron cargar las empresas destino.", true);
     });
   }
 
   function restablecerDestino(){
+    consultaSugerencia++;
+    destinoManual = false;
     empresaDestino.value = "";
+    delete empresaDestino.dataset.sugeridaPara;
+    document.getElementById("empresaDestinoSugerencia").hidden = true;
     workflowCodigo.value = workflowCodigo.defaultValue;
     cerrarConfirmacion();
   }
@@ -1523,9 +1604,12 @@
       return;
     }
     var suma = elegidos.reduce(function(s, d){ return s + d.total; }, 0);
+    var empresaConfirmada = destinosPermitidos.find(function(e){ return e.codigo === destino.empresa_codigo; });
     document.getElementById("confirmMeta").innerHTML =
       "<div>" + elegidos.length + " documento" + (elegidos.length === 1 ? "" : "s") +
-      " · " + fmtCLP(suma) + "</div>";
+      " · " + fmtCLP(suma) + "</div>" +
+      "<div>Destino Finnegans: <strong>" + esc((empresaConfirmada && empresaConfirmada.nombre) || destino.empresa_codigo) +
+      " · " + esc(destino.empresa_codigo) + "</strong></div>";
     document.getElementById("confirmLista").innerHTML = elegidos.map(function(d){
       return "<div>" + esc(d.tipo_nombre || d.tipo) + " " + d.folio + " · " +
         esc(d.proveedor_nombre) + " <span class=\"muted\">· " + fmtCLP(d.total) + "</span></div>";
@@ -2044,10 +2128,17 @@
     empresaActual = e.target.value;
     try { localStorage.setItem("empresaActual", empresaActual); } catch(err){}
     restaurarBandeja();
+    sugerirDestino();
   });
 
   [empresaDestino, workflowCodigo].forEach(function(campo){
     campo.addEventListener("input", function(){
+      if(campo === empresaDestino){
+        consultaSugerencia++;
+        destinoManual = true;
+        delete empresaDestino.dataset.sugeridaPara;
+        document.getElementById("empresaDestinoSugerencia").hidden = true;
+      }
       cerrarConfirmacion();
       errorJsonId = null;
     });
@@ -2119,6 +2210,7 @@
   arrancar();
 })();
 </script>
+<script src="/selectores-buscables.js" defer></script>
 
 </body>
 </html>

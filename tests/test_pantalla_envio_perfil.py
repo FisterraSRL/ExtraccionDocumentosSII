@@ -80,6 +80,7 @@ def test_el_lote_conserva_el_perfil_confirmado():
         pagina.get_by_role("button", name="Ampliar listado").click()
         assert pagina.locator(".cabecera-bandeja").is_hidden()
         pagina.locator("#enviarTodoBtn").click()
+        assert "Empresa A · EMPRESA_A" in pagina.locator("#confirmMeta").inner_text()
         pagina.locator("#confirmOkBtn:enabled").wait_for()
         pagina.keyboard.press("Escape")
         assert pagina.locator("#confirmOverlay").is_hidden()

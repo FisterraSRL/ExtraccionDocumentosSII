@@ -4,7 +4,7 @@ Todo lo que hace falta para seguir trabajando en este repo sin haber visto las
 conversaciones anteriores. Leelo entero antes de tocar código: hay varias trampas que
 cuestan horas si se descubren solas, y están todas anotadas acá abajo.
 
-Última revisión: **25-nov-2026**. Si encontrás algo que ya no es cierto, corregilo en
+Última revisión: **26-nov-2026**. Si encontrás algo que ya no es cierto, corregilo en
 vez de dejarlo: este archivo solo sirve si se puede confiar en él.
 
 ---
@@ -158,10 +158,13 @@ POST   /api/sync                     empresa, periodo, meses, con_items,
 GET    /api/productos/estado         cantidad local del perfil activo
 POST   /api/productos/sincronizar    trae producto/list de Finnegans
 GET    /api/productos?q=...          búsqueda local por nombre o código
+GET    /api/finnegans/sugerencia-empresa?empresa_rut=...  destino permitido con RUT coincidente
 POST   /api/documents/{id}/productos/preparar   sugiere y asocia coincidencias claras
 PUT    /api/documents/{id}/items/{indice}/producto  elección o limpieza manual
 GET    /api/documents/{id}/centros-costo          distribución guardada por ítem
 PUT    /api/documents/{id}/items/{indice}/centros-costo  códigos y porcentajes
+GET    /api/configuracion/sii/{perfil}/limpieza   alcance de la eliminación
+DELETE /api/configuracion/sii/{perfil}            borra certificado y datos exclusivos
 ```
 
 ### Cómo correrlo
@@ -608,9 +611,30 @@ Finnegans sigue asociado al certificado activo, no a la empresa. Si la empresa a
 tiene una sincronización guardada, los KPI muestran "–", no "0": un cero afirmaría
 que no tiene documentos, cuando todavía no se consultó.
 
+Al seleccionar una empresa SII, la bandeja propone una empresa destino de las
+permitidas para el certificado. Compara primero código y nombre normalizados, y
+consulta el RUT en `empresaSucursal` para preferir una coincidencia exacta. Si no hay
+una coincidencia única por ningún criterio, deja la selección manual; una elección manual nunca
+se reemplaza por una respuesta tardía del catálogo. El diálogo de envío muestra el
+destino elegido antes de confirmar.
+
+Los selectores nativos de Bandeja, Equivalencias y Usuarios usan
+`app/static/selectores-buscables.js`: agrega búsqueda por texto/código y conserva
+el `<select>` original como fuente de valor y eventos, incluso si sus opciones se
+recargan. Las listas de certificados y de permisos de usuario también se filtran
+sin desmarcar selecciones ocultas por la búsqueda.
+
 Funcionalidad: KPI, tabs por estado, filtro por tipo, búsqueda por proveedor/RUT/folio,
 detalle expandible con los ítems, insignia de desglose (`sí` / `parcial` / `no`), visor
 de PDF embebido, modal de error con el JSON del documento, y el envío a Finnegans.
+
+En Administración de Certificados, la eliminación muestra primero cuántas facturas
+y empresas se quitarán. Los documentos se guardan por RUT de empresa, no por
+certificado: se borran las facturas y PDF de empresas exclusivas del perfil eliminado;
+las empresas compartidas con otro certificado conservan sus documentos. Se limpian
+las asociaciones, catálogos, permisos, cookies y archivo del perfil eliminado. La
+confirmación incluye los conteos esperados y se rechaza si cambiaron; la limpieza
+no corre mientras se sincroniza o envía con el mismo certificado.
 
 **El envío.** Un solo control, al pie de la bandeja, sobre la **selección**. Antes de
 mandar nada se pide `GET /api/documents/{id}/finnegans` del primero y se muestra en la

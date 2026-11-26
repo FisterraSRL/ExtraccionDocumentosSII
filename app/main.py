@@ -20,6 +20,7 @@ from app.routers import equivalencias as equivalencias_router
 from app import configuracion_sii
 from app import contexto_usuario
 from app import usuarios
+from app import limpieza_certificados
 
 # Sin esto, lo que la app registra en el log no sale por ningún lado: uvicorn configura
 # sus propios loggers y deja el resto en WARNING sin handler. Costó un diagnóstico: un
@@ -91,6 +92,12 @@ class EdicionConfiguracionSII(BaseModel):
 
 class SeleccionCertificado(BaseModel):
     perfil: str
+
+
+class ConfirmacionEliminacion(BaseModel):
+    confirmar: Literal[True]
+    facturas_esperadas: int = Field(ge=0)
+    empresas_esperadas: int = Field(ge=0)
 
 
 class SolicitudRevelar(BaseModel):
@@ -194,6 +201,36 @@ def detalle_configuracion_sii(perfil: str, response: Response):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/api/configuracion/sii/{perfil}/limpieza",
+         dependencies=[Depends(auth.requiere_administrador_gestion)])
+def resumen_limpieza_certificado(perfil: str, response: Response,
+                                db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        resultado = limpieza_certificados.resumen(db, perfil)
+        resultado.pop("_ruts_exclusivas")
+        return resultado
+    except configuracion_sii.ConfiguracionSIIError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.delete("/api/configuracion/sii/{perfil}",
+            dependencies=[Depends(auth.requiere_administrador_gestion)])
+def eliminar_configuracion_sii(perfil: str, confirmacion: ConfirmacionEliminacion,
+                              response: Response, db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return limpieza_certificados.eliminar(db, perfil, confirmacion.facturas_esperadas,
+                                             confirmacion.empresas_esperadas)
+    except (limpieza_certificados.OperacionPerfilEnCurso,
+            limpieza_certificados.AlcanceLimpiezaCambiado) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except limpieza_certificados.LimpiezaParcial as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except configuracion_sii.ConfiguracionSIIError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/api/configuracion/sii/{perfil}/revelar", dependencies=[Depends(auth.requiere_administrador_gestion)])
 def revelar_configuracion_sii(perfil: str, datos: SolicitudRevelar, response: Response):
     try:
@@ -243,6 +280,12 @@ def pagina_equivalencias() -> FileResponse:
 @app.get("/equivalencias-icon.png", include_in_schema=False)
 def icono_equivalencias() -> FileResponse:
     return FileResponse(STATIC_DIR / "equivalencias-icon.png", media_type="image/png")
+
+
+@app.get("/selectores-buscables.js", include_in_schema=False)
+def script_selectores_buscables() -> FileResponse:
+    return FileResponse(STATIC_DIR / "selectores-buscables.js", media_type="application/javascript",
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/configuracion-icon.jpg", include_in_schema=False)

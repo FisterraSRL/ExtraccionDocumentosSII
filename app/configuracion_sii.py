@@ -456,3 +456,61 @@ def seleccionar(identificador: str) -> dict:
         raise ConfiguracionSIIError("El archivo seleccionado no contiene un certificado digital.")
     _exigir_vigencia(certificado)
     return _activar(identificador, datos)
+
+
+def eliminar(identificador: str) -> dict:
+    """Quita un perfil y sus secretos locales después de limpiar sus datos de la base."""
+    datos = _leer_perfiles()
+    perfil = datos["perfiles"].get(identificador)
+    if perfil is None:
+        raise ConfiguracionSIIError("El certificado seleccionado no existe.")
+    archivo = _archivo_perfil(perfil)
+    anterior = datos.get("activo")
+    restantes = {clave: valor for clave, valor in datos["perfiles"].items()
+                 if clave != identificador}
+    siguiente = next(iter(restantes), None) if anterior == identificador else anterior
+    datos_nuevos = {**datos, "activo": siguiente, "perfiles": restantes}
+    cambio_activo = anterior == identificador
+    valores = None
+    if cambio_activo:
+        if siguiente:
+            otro = restantes[siguiente]
+            ruta = _archivo_perfil(otro)
+            valores = _valores_perfil(siguiente, otro,
+                                     str(ruta) if _perfiles_persistentes() else f"secrets/{ruta.name}")
+        else:
+            valores = dict.fromkeys(("SII_RUT", "SII_CERT_PATH", "SII_CERT_PASSWORD", "SII_PERFIL"))
+
+    # En desarrollo .env conserva el perfil global. Si falla la escritura del JSON,
+    # se devuelve .env a su valor anterior y el perfil sigue disponible para reintentar.
+    if cambio_activo and not _perfiles_persistentes():
+        _escribir_env({clave: valor or "" for clave, valor in valores.items()})
+    try:
+        _escribir_perfiles(datos_nuevos)
+    except Exception:
+        if cambio_activo and not _perfiles_persistentes():
+            _escribir_env(_valores_perfil(anterior, perfil, f"secrets/{archivo.name}"))
+        raise
+    if cambio_activo:
+        _configurar_proceso(valores)
+
+    # Puede existir un archivo legado compartido por dos perfiles. En ese caso no se
+    # borra mientras el otro perfil lo siga usando.
+    compartido = any(_archivo_perfil(otro).name == archivo.name for otro in restantes.values())
+    nombre_perfil = re.sub(r"[^a-z0-9_-]", "", identificador.lower()) or "actual"
+    archivos = [
+        DIRECTORIO_SECRETOS / f"sii_sesion_{nombre_perfil}.json",
+        DIRECTORIO_SECRETOS / f"sii_estado_{nombre_perfil}.json",
+    ]
+    if nombre_perfil == "actual":
+        archivos.extend((DIRECTORIO_SECRETOS / "sii_sesion.json",
+                         DIRECTORIO_SECRETOS / "sii_estado.json"))
+    if not compartido:
+        archivos.append(archivo)
+    pendientes = []
+    for ruta in archivos:
+        try:
+            ruta.unlink(missing_ok=True)
+        except OSError:
+            pendientes.append(ruta.name)
+    return {"activo": siguiente, "archivos_pendientes": pendientes}

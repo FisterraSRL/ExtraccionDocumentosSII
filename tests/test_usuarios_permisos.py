@@ -5,6 +5,7 @@ from datetime import date, datetime
 from http.cookies import SimpleCookie
 from unittest.mock import patch
 
+import pytest
 from fastapi import HTTPException, Response
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -218,6 +219,52 @@ def test_catalogo_de_destinos_usa_sucursales_activas():
     ]
     cliente.return_value.catalogo.assert_called_once_with("empresaSucursal")
     usuarios._cache_empresas.clear()
+
+
+def test_sugerencia_por_rut_respeta_empresas_sii_y_destinos_permitidos():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sesiones = sessionmaker(engine)
+    try:
+        with sesiones() as db:
+            usuario = Usuario(email="sugerencia@example.invalid", password_hash="hash", rol="usuario")
+            db.add(usuario)
+            db.flush()
+            db.add_all([
+                Empresa(rut="11111111-1"), Empresa(rut="22222222-2"),
+                EmpresaPerfil(perfil_id="uno", empresa_rut="11111111-1", en_portal_fe=True),
+                EmpresaPerfil(perfil_id="uno", empresa_rut="22222222-2", en_portal_fe=True),
+            ])
+            db.flush()
+            with patch.object(usuarios.configuracion_sii, "estado", return_value={
+                "activo": "uno", "perfiles": [{"id": "uno", "nombre": "Uno"}]
+            }), patch.object(usuarios, "empresas_finnegans", return_value=[
+                {"codigo": "ERP-A", "nombre": "Sucursal A"},
+                {"codigo": "ERP-B", "nombre": "Sucursal B"},
+            ]):
+                usuarios._guardar_permisos(db, usuario, [usuarios.PermisoCertificado(
+                    perfil_id="uno", empresas=["ERP-A"], empresas_sii=["11111111-1"],
+                )])
+                db.commit()
+                principal = Principal(usuario.id, usuario.email, usuario.rol, "uno")
+                with patch.object(usuarios.configuracion_sii, "credenciales_finnegans_para_perfil",
+                                  return_value=("uno", "id", "secreto")), patch.object(
+                    usuarios, "FinnegansClient"
+                ) as cliente:
+                    cliente.return_value.empresa_para_rut.return_value = "ERP-A"
+                    assert usuarios.sugerir_empresa_finnegans(principal, db, "uno", "11111111-1") == "ERP-A"
+                    cliente.return_value.empresa_para_rut.return_value = "ERP-B"
+                    assert usuarios.sugerir_empresa_finnegans(principal, db, "uno", "11111111-1") == ""
+                    with pytest.raises(HTTPException) as denegado:
+                        usuarios.sugerir_empresa_finnegans(principal, db, "uno", "22222222-2")
+                    assert denegado.value.status_code == 403
+                with patch.object(usuarios, "empresas_finnegans", return_value=[
+                    {"codigo": "ERP-A", "nombre": "Sucursal A", "rut": "11.111.111-1"},
+                ]), patch.object(usuarios, "FinnegansClient") as cliente:
+                    assert usuarios.sugerir_empresa_finnegans(principal, db, "uno", "11111111-1") == "ERP-A"
+                    cliente.assert_not_called()
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

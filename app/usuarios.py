@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app import auth, configuracion_sii
 from app.contexto_usuario import Principal, actual
 from app.db import get_db
-from app.finnegans.client import FinnegansAPIError, FinnegansClient, FinnegansConfigError
+from app.finnegans.client import FinnegansAPIError, FinnegansClient, FinnegansConfigError, FinnegansMapeoError
 from app.models import Empresa, EmpresaPerfil, EmpresasPerfilEstado, Usuario, UsuarioCertificado, UsuarioEmpresaFinnegans, UsuarioEmpresaSII
 
 router = APIRouter(prefix="/api", tags=["usuarios"])
@@ -120,7 +120,11 @@ def empresas_finnegans(perfil_id: str) -> list[dict]:
         if not codigo or fila.get("Activo") is False or fila.get("activo") is False:
             continue
         nombre = str(fila.get("nombre") or fila.get("Nombre") or codigo).strip()
-        empresas.append({"codigo": codigo, "nombre": nombre})
+        empresa = {"codigo": codigo, "nombre": nombre}
+        rut = str(fila.get("CUIT") or fila.get("cuit") or "").strip()
+        if rut:
+            empresa["rut"] = rut
+        empresas.append(empresa)
     empresas.sort(key=lambda e: (e["nombre"].casefold(), e["codigo"]))
     with _cache_lock:
         _cache_empresas[llave] = (time.monotonic() + 600, empresas)
@@ -139,6 +143,30 @@ def empresas_permitidas(principal: Principal, db: Session, perfil_id: str) -> li
         return []
     empresas = empresas_finnegans(perfil_id)
     return [empresa for empresa in empresas if empresa["codigo"] in codigos]
+
+
+def sugerir_empresa_finnegans(principal: Principal, db: Session, perfil_id: str,
+                              empresa_rut: str) -> str:
+    """Sugiere una sucursal permitida cuyo RUT coincide con la empresa del SII."""
+    if empresa_rut not in ruts_sii_permitidos(principal, db, perfil_id):
+        raise HTTPException(status_code=403, detail="No tenés acceso a esta empresa del SII.")
+    permitidas = empresas_permitidas(principal, db, perfil_id)
+    codigos = {empresa["codigo"] for empresa in permitidas}
+    rut_normalizado = re.sub(r"[^0-9kK]", "", empresa_rut).upper()
+    directas = [empresa["codigo"] for empresa in permitidas
+                if re.sub(r"[^0-9kK]", "", empresa.get("rut", "")).upper() == rut_normalizado]
+    if len(directas) == 1:
+        return directas[0]
+    if len(directas) > 1:
+        return ""
+    try:
+        _, client_id, client_secret = configuracion_sii.credenciales_finnegans_para_perfil(perfil_id)
+        codigo = FinnegansClient(perfil_id, client_id, client_secret).empresa_para_rut(empresa_rut)
+    except FinnegansMapeoError:
+        return ""
+    except (configuracion_sii.ConfiguracionSIIError, FinnegansAPIError, FinnegansConfigError) as exc:
+        raise HTTPException(status_code=503, detail="No se pudo buscar la empresa en Finnegans.") from exc
+    return codigo if codigo in codigos else ""
 
 
 def exigir_empresa(principal: Principal, db: Session, perfil_id: str, codigo: str | None) -> str:
@@ -251,6 +279,13 @@ def listar_empresas_permitidas(principal: Principal = Depends(auth.requiere_sesi
                               db: Session = Depends(get_db)):
     perfil = exigir_perfil(principal, db)
     return {"perfil": perfil, "empresas": empresas_permitidas(principal, db, perfil)}
+
+
+@router.get("/finnegans/sugerencia-empresa", dependencies=[Depends(auth.requiere_sesion)])
+def sugerencia_empresa(empresa_rut: str, principal: Principal = Depends(auth.requiere_sesion),
+                       db: Session = Depends(get_db)):
+    perfil = exigir_perfil(principal, db)
+    return {"codigo": sugerir_empresa_finnegans(principal, db, perfil, empresa_rut)}
 
 
 @router.get("/administracion/usuarios", dependencies=[Depends(auth.requiere_administrador_gestion)])
