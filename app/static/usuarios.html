@@ -18,9 +18,14 @@
     form{display:grid;gap:16px}.field{display:grid;gap:6px;font-size:.9rem;font-weight:700}input[type=email],input[type=password],input[type=text],select{width:100%;padding:10px;border:1px solid #aebbc7;border-radius:8px;background:#fff;color:#0a2f43;font:inherit}.password-control{display:flex;gap:8px}.password-control input{flex:1;min-width:0}.password-control button{border:1px solid #aebbc7;border-radius:8px;background:#fff;color:#0a2f43;padding:0 10px;font-weight:700}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.check{display:flex;gap:9px;align-items:center;font-size:.9rem}.check input{width:18px;height:18px}
     .note{color:#657788;font-size:.86rem;line-height:1.5}.error{color:#9b2730;background:#ffe9e9;padding:11px;border-radius:8px}.success{color:#1d6948;background:#e6f5ee;padding:11px;border-radius:8px}
-    .cert{border:1px solid #cbd4dc;border-radius:12px;padding:14px;margin:10px 0;background:#fafbfc}.catalogo{margin-top:14px}.catalogo h3{font-size:.92rem;margin:0 0 7px}.companies{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:7px;max-height:210px;overflow:auto}.companies .check{align-items:flex-start;font-size:.81rem}.muted{opacity:.55}
-    .buscar-lista{width:100%;padding:9px 10px;border:1px solid #aebbc7;border-radius:8px;background:#fff;color:#0a2f43;font:inherit}.catalogo .buscar-lista{margin:0 0 8px}.list .item[hidden],.cert[hidden],.companies .check[hidden]{display:none!important}
-    @media(max-width:760px){.layout{grid-template-columns:1fr}.row{grid-template-columns:1fr}}
+    .cert{border:1px solid #cbd4dc;border-radius:12px;padding:16px;margin:12px 0;background:#fafbfc}.cert>.check{font-weight:700;color:#22375e}
+    .catalogos-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}.catalogos-grid[hidden]{display:none!important}
+    .catalogo{min-width:0;border:1px solid #bfd4e2;border-radius:12px;padding:16px;background:#f3f8fc}.catalogo-finnegans{border-color:#c9ddcf;background:#f4faf6}
+    .catalogo-encabezado{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px}.catalogo h3{font-size:.93rem;line-height:1.3;margin:0 0 4px;color:#173d59}.catalogo-finnegans h3{color:#285b3d}
+    .catalogo-encabezado small{display:block;color:#617886;font-size:.75rem;line-height:1.35}.catalogo-marca{flex:none;border-radius:20px;padding:4px 8px;background:#dcecf5;color:#174a70;font-size:.68rem;font-weight:800}.catalogo-finnegans .catalogo-marca{background:#dcefe2;color:#24633f}
+    .companies{display:grid;grid-template-columns:1fr;gap:7px;max-height:230px;overflow:auto;border-top:1px solid #d6e3ea;padding-top:10px}.catalogo-finnegans .companies{border-top-color:#d8e6dc}.companies .check{align-items:flex-start;font-size:.81rem;line-height:1.35}.muted{opacity:.55}
+    .buscar-lista{width:100%;padding:9px 10px;border:1px solid #aebbc7;border-radius:8px;background:#fff;color:#0a2f43;font:inherit}.catalogo .buscar-lista{margin:0 0 12px}.list .item[hidden],.cert[hidden],.companies .check[hidden]{display:none!important}
+    @media(max-width:900px){.catalogos-grid{grid-template-columns:1fr}}@media(max-width:760px){.layout{grid-template-columns:1fr}.row{grid-template-columns:1fr}}
   </style>
 </head>
 <body><main>
@@ -102,17 +107,24 @@ function pintarCertificados(){
     var etiqueta=document.createElement("label");etiqueta.className="check";
     var casilla=document.createElement("input");casilla.type="checkbox";casilla.className="perfil-check";casilla.checked=!!asignado;
     etiqueta.append(casilla,document.createTextNode(perfil.nombre));caja.appendChild(etiqueta);
-    var grupos=document.createElement("div");grupos.hidden=!casilla.checked;
-    [["Empresas SII para la bandeja","empresas-sii"],["Sucursales Finnegans para el envío","empresas-finnegans"]].forEach(function(datos){
+    var grupos=document.createElement("div");grupos.className="catalogos-grid";grupos.hidden=!casilla.checked;
+    [["Empresas del SII","empresas-sii","Visibles en la bandeja","SII"],
+     ["Sucursales de Finnegans","empresas-finnegans","Destinos habilitados para enviar","ERP"]].forEach(function(datos){
       var grupo=document.createElement("div");grupo.className="catalogo";
+      if(datos[1]==="empresas-finnegans")grupo.classList.add("catalogo-finnegans");
+      var encabezado=document.createElement("div");encabezado.className="catalogo-encabezado";
+      var texto=document.createElement("div");
       var titulo=document.createElement("h3");titulo.textContent=datos[0];
+      var ayuda=document.createElement("small");ayuda.textContent=datos[2];
+      var marca=document.createElement("span");marca.className="catalogo-marca";marca.textContent=datos[3];
+      texto.append(titulo,ayuda);encabezado.append(texto,marca);
       var buscador=document.createElement("input");buscador.type="search";buscador.className="buscar-lista";
       buscador.placeholder="Buscar empresa, RUT o código";buscador.setAttribute("aria-label","Buscar en "+datos[0]);
       var empresas=document.createElement("div");empresas.className="companies "+datos[1];
       buscador.addEventListener("input",function(){
         empresas.querySelectorAll(".check").forEach(function(opcion){opcion.hidden=!coincide(opcion.textContent,buscador.value)});
       });
-      grupo.append(titulo,buscador,empresas);grupos.appendChild(grupo);
+      grupo.append(encabezado,buscador,empresas);grupos.appendChild(grupo);
     });
     caja.appendChild(grupos);
     casilla.addEventListener("change",function(){grupos.hidden=!casilla.checked;if(casilla.checked&&caja.dataset.catalogosListos!=="1")cargarCatalogos(perfil.id,caja,null)});
