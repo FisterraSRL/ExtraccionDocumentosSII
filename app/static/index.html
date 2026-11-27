@@ -379,6 +379,7 @@
   .header-icon img{display:block;width:24px;height:24px;object-fit:contain;mix-blend-mode:multiply;}
   .header-icon svg{display:block;width:24px;height:24px;}
   .header-icon:hover img{opacity:.72;}
+  .manual-btn span{display:grid;place-items:center;width:23px;height:23px;border:2px solid currentColor;border-radius:50%;font-size:15px;font-weight:800;line-height:1;}
 
   /* ---------- Toast ---------- */
   .toast{
@@ -436,6 +437,7 @@
     <span class="app-version" id="appVersion" title="Versión del portal"></span>
     <span class="perfil-activo" id="perfilActivo" hidden title="Certificado SII activo"></span>
     <div class="header-tools">
+      <a class="link-btn header-icon manual-btn" href="/manual" title="Abrir manual de uso" aria-label="Abrir manual de uso"><span aria-hidden="true">?</span></a>
       <a class="link-btn header-icon equivalencias-btn" href="/equivalencias" title="Administrar equivalencias de productos" aria-label="Administrar equivalencias de productos"><img src="/equivalencias-icon.png" alt="" width="24" height="24"></a>
       <a class="link-btn header-icon" id="usuariosLink" href="/usuarios" title="Administrar usuarios" aria-label="Administrar usuarios" hidden>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">

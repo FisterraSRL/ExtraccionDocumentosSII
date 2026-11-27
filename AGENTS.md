@@ -121,6 +121,7 @@ app/
     productos.py   Sincronización local y asociaciones por ítem.
   static/
     index.html     El portal ("Bandeja SII"). Ver §9.
+    manual.html    Guía de uso interactiva, accesible desde la barra superior.
 scripts/
   test_sii_connection.py   Valida .env + certificado + TLS. Correr primero.
   probar_login_navegador.py Prueba manual del login.
@@ -140,6 +141,7 @@ Excel datos/Reporte.xlsx  Catálogo de subtipos de transacción de Finnegans, qu
 
 ```
 GET    /                             el portal
+GET    /manual                       manual HTML (requiere sesión)
 GET    /health, /api/version, /api/sesion      públicos
 POST   /api/login, /api/logout
 
@@ -627,6 +629,8 @@ sin desmarcar selecciones ocultas por la búsqueda.
 Funcionalidad: KPI, tabs por estado, filtro por tipo, búsqueda por proveedor/RUT/folio,
 detalle expandible con los ítems, insignia de desglose (`sí` / `parcial` / `no`), visor
 de PDF embebido, modal de error con el JSON del documento, y el envío a Finnegans.
+La barra superior enlaza `/manual`, una guía HTML con índice y búsqueda en vivo;
+la ruta exige sesión, pero está disponible también para usuarios no administradores.
 
 En Administración de Certificados, la eliminación muestra primero cuántas facturas
 y empresas se quitarán. Los documentos se guardan por RUT de empresa, no por

@@ -277,6 +277,11 @@ def pagina_equivalencias() -> FileResponse:
     return FileResponse(STATIC_DIR / "equivalencias.html", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/manual", include_in_schema=False, dependencies=[Depends(auth.requiere_sesion)])
+def pagina_manual() -> FileResponse:
+    return FileResponse(STATIC_DIR / "manual.html", headers={"Cache-Control": "no-store"})
+
+
 @app.get("/equivalencias-icon.png", include_in_schema=False)
 def icono_equivalencias() -> FileResponse:
     return FileResponse(STATIC_DIR / "equivalencias-icon.png", media_type="image/png")

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Manual de uso · Documentos SII</title>
+  <style>
+    :root{font-family:Montserrat,"Segoe UI",Arial,sans-serif;color:#0a2f43;background:#e7e9ed;scroll-behavior:smooth}
+    *{box-sizing:border-box}[hidden]{display:none!important}body{margin:0}a{color:#0a2f43;text-underline-offset:3px}button,input{font:inherit}
+    .barra{background:#0a2f43;color:#fff}.barra-interior{max-width:1180px;margin:auto;padding:12px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+    .marca{font-size:.74rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase}.barra a{color:#fff;margin-left:auto;font-size:.82rem;font-weight:700}
+    .contenedor{max-width:1180px;margin:auto;padding:36px 24px 80px}.etiqueta{color:#c61c28;font-size:.78rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+    h1{font-size:clamp(2.3rem,5vw,4rem);line-height:1.06;margin:8px 0 14px;color:#c61c28}h1 span{display:block;color:#22375e;font-weight:400}
+    .introduccion{max-width:760px;color:#536b7a;font-size:1rem;line-height:1.65;margin:0 0 24px}
+    .ruta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 30px;padding:0;list-style:none;counter-reset:ruta}
+    .ruta li{counter-increment:ruta;background:#fff;border:1px solid #d3dce2;border-radius:12px;padding:14px;font-size:.84rem;font-weight:700;line-height:1.4}
+    .ruta li:before{content:counter(ruta,decimal-leading-zero);display:block;color:#c61c28;font-size:.72rem;margin-bottom:5px}
+    .disposicion{display:grid;grid-template-columns:235px minmax(0,1fr);align-items:start;gap:24px}
+    .indice{position:sticky;top:20px;background:#f8f9fa;border:1px solid #d3dce2;border-radius:16px;padding:18px}
+    .indice h2{font-size:.88rem;margin:0 0 12px;text-transform:uppercase;letter-spacing:.05em;color:#5a7080}
+    .buscar{width:100%;padding:10px 12px;border:1px solid #aab9c4;border-radius:9px;background:#fff;color:#0a2f43;outline-color:#0a2f43}
+    .buscar-ayuda{font-size:.72rem;color:#637785;margin:8px 0 16px;line-height:1.4}.indice nav{display:grid;gap:3px}
+    .indice nav a{display:block;border-radius:8px;padding:8px 10px;text-decoration:none;font-size:.82rem;font-weight:600;color:#38546a;line-height:1.35}
+    .indice nav a:hover,.indice nav a.activo{background:#e4edf3;color:#0a2f43}.resultado{font-size:.75rem;color:#647b89;margin:14px 0 0}
+    .capitulos{display:grid;gap:16px;min-width:0}.capitulo{scroll-margin-top:20px;background:#fff;border:1px solid #d3dce2;border-radius:16px;padding:24px 27px;box-shadow:0 3px 14px #0a2f4309}
+    .capitulo-encabezado{display:flex;align-items:flex-start;gap:14px;margin-bottom:14px}.numero{flex:none;width:33px;height:33px;display:grid;place-items:center;border-radius:9px;background:#ffe5e6;color:#ac1823;font-size:.76rem;font-weight:800}
+    h2{font-size:1.22rem;color:#22375e;margin:2px 0 0}h3{font-size:.94rem;color:#173d59;margin:20px 0 8px}.capitulo p,.capitulo li{font-size:.88rem;line-height:1.65}.capitulo p{margin:8px 0}.capitulo ol,.capitulo ul{padding-left:21px;margin:9px 0}.capitulo li+li{margin-top:6px}
+    .nota{border-left:4px solid #b7ccda;background:#eef4f7;border-radius:0 9px 9px 0;padding:10px 13px;margin:14px 0;font-size:.84rem;line-height:1.55}.nota.alerta{border-color:#d89966;background:#fff3e9}.nota strong{color:#22375e}
+    .enlaces{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.enlaces a{border:1px solid #c5d3dd;background:#f4f8fa;border-radius:8px;padding:8px 11px;text-decoration:none;font-size:.79rem;font-weight:700}
+    .dos-columnas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mini{border:1px solid #d9e2e7;background:#f7f9fa;border-radius:10px;padding:12px}.mini h3{margin:0 0 5px}.mini p{margin:0}
+    details{border:1px solid #d7e1e7;border-radius:9px;margin:8px 0;background:#f8fafb}summary{cursor:pointer;padding:12px 14px;font-size:.85rem;font-weight:700}details p{padding:0 14px 13px;margin:0!important}
+    .sin-resultados{background:#fff;border-radius:12px;padding:26px;text-align:center;color:#5c7180}
+    .pie{margin:22px 0 0;font-size:.77rem;color:#607787}.pie a{font-weight:700}
+    @media(max-width:850px){.disposicion{grid-template-columns:1fr}.indice{position:static}.indice nav{grid-template-columns:repeat(2,minmax(0,1fr))}.ruta{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:560px){.contenedor{padding:26px 14px 60px}.barra-interior{padding:12px 14px}.indice nav,.ruta,.dos-columnas{grid-template-columns:1fr}.capitulo{padding:19px 17px}}
+  </style>
+</head>
+<body>
+<header class="barra"><div class="barra-interior"><span class="marca">Documentos SII · Manual de uso</span><a href="/">← Volver a la bandeja</a></div></header>
+<main class="contenedor">
+  <span class="etiqueta">Guía de trabajo</span>
+  <h1>Manual de uso<span>del sistema</span></h1>
+  <p class="introduccion">Desde la selección del certificado hasta el envío a Finnegans. Buscá un tema, elegilo en el índice y seguí los pasos de la pantalla.</p>
+  <ol class="ruta" aria-label="Recorrido principal"><li>Ingresar y elegir certificado</li><li>Elegir empresa y sincronizar</li><li>Revisar documentos y productos</li><li>Confirmar envío a Finnegans</li></ol>
+  <div class="disposicion">
+    <aside class="indice" aria-label="Índice del manual">
+      <h2>Encontrá una respuesta</h2>
+      <input id="buscarManual" class="buscar" type="search" placeholder="Buscar tema o palabra" aria-label="Buscar en el manual" autocomplete="off">
+      <p class="buscar-ayuda">La búsqueda filtra los capítulos mientras escribís.</p>
+      <nav id="indiceManual">
+        <a href="#acceso">Acceso y permisos</a>
+        <a href="#preparar">Preparar la bandeja</a>
+        <a href="#sincronizar">Sincronizar con SII</a>
+        <a href="#revisar">Revisar documentos</a>
+        <a href="#productos">Productos y equivalencias</a>
+        <a href="#enviar">Enviar a Finnegans</a>
+        <a href="#estados">Estados y reenvío</a>
+        <a href="#certificados">Certificados · administrador</a>
+        <a href="#usuarios">Usuarios · administrador</a>
+        <a href="#problemas">Problemas frecuentes</a>
+      </nav>
+      <p class="resultado" id="resultadoManual" role="status"></p>
+    </aside>
+    <div class="capitulos" id="capitulosManual">
+      <article class="capitulo" id="acceso">
+        <div class="capitulo-encabezado"><span class="numero">01</span><h2>Acceso y permisos</h2></div>
+        <ol><li>Abrí la aplicación e ingresá con el usuario y la contraseña que te asignó un administrador.</li><li>En la barra superior, comprobá qué certificado SII está activo. Cada usuario ve únicamente los certificados y empresas que tiene permitidos.</li><li>Cuando termines, usá el icono de la puerta abierta para cerrar la sesión.</li></ol>
+        <div class="nota">Si no aparece el certificado o una empresa esperada, pedile a un administrador que revise tus permisos en <strong>Administración de usuarios</strong>.</div>
+      </article>
+
+      <article class="capitulo" id="preparar">
+        <div class="capitulo-encabezado"><span class="numero">02</span><h2>Preparar la bandeja</h2></div>
+        <ol><li>En <strong>Certificado SII</strong>, elegí el perfil con el que vas a trabajar.</li><li>En <strong>Empresa del certificado</strong>, seleccioná la empresa cuyos documentos querés consultar. Podés escribir su nombre o RUT para encontrarla.</li><li>Revisá <strong>Empresa destino Finnegans</strong> y <strong>Workflow</strong> antes del envío. El sistema puede sugerir un destino; confirmá que sea el correcto. Podés elegir otro destino permitido.</li></ol>
+        <p><strong>Ponerle nombre</strong> permite identificar una empresa que el SII muestra solo por RUT. La bandeja recuerda los documentos ya guardados cuando navegás entre pantallas o cambiás de empresa.</p>
+      </article>
+
+      <article class="capitulo" id="sincronizar">
+        <div class="capitulo-encabezado"><span class="numero">03</span><h2>Sincronizar con SII</h2></div>
+        <ol><li>Elegí primero una empresa del certificado.</li><li>Pulsá <strong>Sincronizar con SII</strong> y esperá a que termine. La aplicación consulta el registro de compras y, cuando está disponible, el detalle del documento.</li><li>Revisá el mensaje de resultado y la bandeja. Los documentos que ya existían se actualizan sin perder su estado de envío.</li></ol>
+        <div class="nota">Volver a la bandeja no exige sincronizar otra vez: los datos guardados se cargan desde la base. Si el SII limita las consultas o no responde, esperá antes de reintentar.</div>
+      </article>
+
+      <article class="capitulo" id="revisar">
+        <div class="capitulo-encabezado"><span class="numero">04</span><h2>Revisar documentos y PDF</h2></div>
+        <p>Los cuadros superiores muestran pendientes, enviados, errores y total de la empresa seleccionada. Las solapas <strong>Todos</strong>, <strong>Pendientes</strong>, <strong>Enviados</strong> y <strong>Con error</strong> separan los estados.</p>
+        <ol><li>Buscá por proveedor, RUT o folio. El selector de tipo de documento también admite escritura para filtrar opciones.</li><li>Abrí una fila con la flecha de la derecha para consultar ítems, importes, impuestos y productos asignados.</li><li>Usá <strong>Ver documento (PDF)</strong> o <strong>Abrir en otra pestaña</strong> para comparar con el original del SII.</li></ol>
+        <div class="nota">Algunas empresas o documentos no ofrecen PDF ni detalle de ítems en el portal de facturación del SII. La bandeja lo indica cuando ocurre.</div>
+      </article>
+
+      <article class="capitulo" id="productos">
+        <div class="capitulo-encabezado"><span class="numero">05</span><h2>Productos y equivalencias</h2></div>
+        <ol><li>En el detalle de cada documento, abrí el selector de <strong>Producto Finnegans</strong> de cada ítem.</li><li>Escribí parte del nombre o el código, elegí el producto correcto y repetí por cada ítem. La elección queda asociada al certificado activo.</li><li>Para administrar varias relaciones por descripción, entrá al <strong>icono de equivalencias</strong> de la barra superior. Podés seleccionar varios productos y guardarlos juntos al final de la grilla.</li></ol>
+        <p>Las sugerencias ayudan a encontrar productos, pero conviene revisar cada relación antes de enviarla. Un administrador puede actualizar el catálogo de productos de Finnegans desde el engranaje de certificados.</p>
+        <div class="enlaces"><a href="/equivalencias">Abrir equivalencias</a></div>
+      </article>
+
+      <article class="capitulo" id="enviar">
+        <div class="capitulo-encabezado"><span class="numero">06</span><h2>Enviar a Finnegans</h2></div>
+        <ol><li>Confirmá el <strong>destino Finnegans</strong> y el <strong>Workflow</strong> de la parte superior.</li><li>Marcá las casillas de los documentos pendientes que quieras enviar. Los documentos con error también se pueden reintentar después de corregirlos.</li><li>Pulsá <strong>Enviar a Finnegans</strong>. El diálogo muestra los documentos, el destino y la vista previa del JSON del <strong>primer</strong> documento. Esperá a que termine la validación.</li><li>Si los datos son correctos, confirmá con <strong>Enviar</strong> y revisá el resultado de cada documento.</li></ol>
+        <div class="nota alerta"><strong>Atención:</strong> confirmar el envío registra comprobantes en el ERP. La vista previa comprueba el primer documento; los demás se procesan uno por uno y pueden tener resultados distintos.</div>
+      </article>
+
+      <article class="capitulo" id="estados">
+        <div class="capitulo-encabezado"><span class="numero">07</span><h2>Estados, errores y reenvío</h2></div>
+        <div class="dos-columnas">
+          <div class="mini"><h3>Pendiente</h3><p>Disponible para seleccionar y enviar.</p></div>
+          <div class="mini"><h3>Enviado</h3><p>Registrado en Finnegans. Si figura <strong>Otro método</strong>, el ERP ya lo tenía cargado.</p></div>
+          <div class="mini"><h3>Con error</h3><p>Abrí <strong>Ver detalle</strong>, corregí el motivo y volvé a seleccionar el documento.</p></div>
+          <div class="mini"><h3>Reenvío</h3><p>Solo para documentos enviados cuya carga fue eliminada primero en Finnegans.</p></div>
+        </div>
+        <p>En el detalle de un error, <strong>Ver el JSON del documento</strong> muestra cómo se armaría ahora con la configuración actual. No es una copia histórica del envío fallido.</p>
+        <p>Para volver a enviar un documento ya enviado, eliminá antes el comprobante en Finnegans. Luego, en la bandeja, usá <strong>Habilitar reenvío</strong>, confirmá la baja y enviá nuevamente desde Pendientes. La aplicación no borra el comprobante del ERP.</p>
+      </article>
+
+      <article class="capitulo" id="certificados">
+        <div class="capitulo-encabezado"><span class="numero">08</span><h2>Administrar certificados <small>· Solo administradores</small></h2></div>
+        <p>Desde el engranaje de la barra superior abrí la configuración. Allí podés consultar certificados, editar datos, cargar uno nuevo y elegir <strong>Usar este certificado</strong>. El formulario también guarda el Client_ID y Client_Secret asociados a ese perfil; los campos sensibles aparecen ocultos y tienen botón para mostrarlos temporalmente.</p>
+        <p><strong>Eliminar certificado y facturas</strong> presenta primero cuántas empresas y facturas se quitarán. Borra los documentos de empresas exclusivas de ese certificado; los de empresas compartidas con otro certificado se conservan. Revisá el alcance antes de confirmar: no se puede deshacer desde la pantalla.</p>
+        <div class="enlaces"><a href="/configuracion">Abrir configuración</a></div>
+      </article>
+
+      <article class="capitulo" id="usuarios">
+        <div class="capitulo-encabezado"><span class="numero">09</span><h2>Administrar usuarios <small>· Solo administradores</small></h2></div>
+        <ol><li>Abrí el icono de usuario en la barra superior y elegí un usuario existente o pulsá <strong>+ Nuevo usuario</strong>.</li><li>Completá correo, rol, contraseña y estado de la cuenta.</li><li>Para usuarios comunes, marcá los certificados permitidos. En cada uno, elegí por separado <strong>Empresas del SII</strong> para la bandeja y <strong>Sucursales de Finnegans</strong> para el envío.</li><li>Pulsá <strong>Guardar usuario</strong>. Los administradores tienen acceso a todos los certificados y empresas.</li></ol>
+        <p>Los buscadores filtran las listas sin desmarcar casillas ya elegidas. Al modificar permisos o contraseña, la sesión anterior de ese usuario deja de ser válida.</p>
+        <div class="enlaces"><a href="/usuarios">Abrir usuarios</a></div>
+      </article>
+
+      <article class="capitulo" id="problemas">
+        <div class="capitulo-encabezado"><span class="numero">10</span><h2>Problemas frecuentes</h2></div>
+        <details><summary>No aparece una empresa o un certificado</summary><p>Comprobá el certificado activo. Si el perfil o la empresa no figura en el selector, pedile a un administrador que revise la asignación del usuario y la lista de empresas de ese certificado.</p></details>
+        <details><summary>La sincronización falla o tarda mucho</summary><p>Leé el mensaje que aparece en la bandeja. Si el SII no responde o limita la frecuencia de consultas, esperá y reintentá más tarde; los documentos que se alcanzaron a guardar permanecen en la base.</p></details>
+        <details><summary>No se puede abrir un PDF</summary><p>Algunos documentos no están en el Portal de Facturación Electrónica del SII. Si el botón indica que el PDF debería estar disponible y falla, probá de nuevo más tarde o consultá al administrador.</p></details>
+        <details><summary>No encuentro un producto Finnegans</summary><p>Buscalo por parte del nombre o por código. Si sigue sin aparecer, pedile a un administrador que sincronice el catálogo desde el engranaje de certificados y comprobá que estás en el perfil correcto.</p></details>
+        <details><summary>Finnegans rechaza un documento</summary><p>Abrí <strong>Ver detalle</strong> en la solapa Con error. Revisá el motivo, el PDF y, si hace falta, el JSON actual. Corregí productos, destino o datos pendientes antes de volver a enviar.</p></details>
+      </article>
+      <p class="sin-resultados" id="sinResultados" hidden>No hay capítulos que coincidan. Probá con otra palabra.</p>
+    </div>
+  </div>
+  <p class="pie">Manual integrado en la aplicación <span id="manualVersion"></span> · <a href="/">Volver a la bandeja</a></p>
+</main>
+<script>
+(function(){
+  "use strict";
+  var buscador=document.getElementById("buscarManual");
+  var capitulos=Array.from(document.querySelectorAll(".capitulo"));
+  var enlaces=Array.from(document.querySelectorAll("#indiceManual a"));
+  function normalizar(texto){return texto.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase()}
+  function filtrar(){
+    var consulta=normalizar(buscador.value.trim()),visibles=0;
+    capitulos.forEach(function(capitulo){
+      var mostrar=normalizar(capitulo.textContent).includes(consulta);
+      capitulo.hidden=!mostrar;if(mostrar)visibles++;
+      capitulo.querySelectorAll("details").forEach(function(detalle){
+        if(consulta&&normalizar(detalle.textContent).includes(consulta)){
+          if(!detalle.open){detalle.open=true;detalle.dataset.abiertoBusqueda="1"}
+        }else if(detalle.dataset.abiertoBusqueda){
+          detalle.open=false;delete detalle.dataset.abiertoBusqueda;
+        }
+      });
+    });
+    enlaces.forEach(function(enlace){enlace.hidden=document.querySelector(enlace.getAttribute("href")).hidden});
+    document.getElementById("resultadoManual").textContent=visibles+" "+(visibles===1?"tema disponible":"temas disponibles");
+    document.getElementById("sinResultados").hidden=visibles!==0;
+  }
+  buscador.addEventListener("input",filtrar);
+  enlaces.forEach(function(enlace){enlace.addEventListener("click",function(){
+    enlaces.forEach(function(otro){otro.classList.remove("activo");otro.removeAttribute("aria-current")});
+    enlace.classList.add("activo");enlace.setAttribute("aria-current","location");
+  })});
+  filtrar();
+  fetch("/api/version",{cache:"no-store"}).then(function(respuesta){return respuesta.ok?respuesta.json():{}})
+    .then(function(datos){if(datos.version)document.getElementById("manualVersion").textContent="v"+datos.version})
+    .catch(function(){/* El manual sigue disponible sin el número de versión. */});
+})();
+</script>
+</body>
+</html>
